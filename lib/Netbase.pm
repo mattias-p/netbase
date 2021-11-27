@@ -1,0 +1,339 @@
+package Netbase;
+
+use strict;
+use warnings;
+use 5.014;
+
+our $VERSION = '0.01';
+
+use Carp qw( croak );
+use Const::Fast;
+use Exporter qw( import );
+use FFI::Platypus 1.00;
+use Scalar::Util qw( blessed dualvar isdual looks_like_number );
+
+our @EXPORT_OK = qw(
+  ip
+  name
+  question
+  rrtype
+);
+our %EXPORT_TAGS = (
+    helpers => [
+        qw(
+          ip
+          name
+          question
+          rrtype
+        )
+    ],
+);
+
+my %NAME2RRTYPE;
+my %NUM2RRTYPE;
+my %NUM2ERROR;
+
+my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
+
+$ffi->load_custom_type( '::PointerSizeBuffer' => 'buffer' );
+
+$ffi->type( 'object(Netbase::Cache)'    => 'cache_t' );
+$ffi->type( 'object(Netbase::Client)'   => 'client_t' );
+$ffi->type( 'object(Netbase::IP)'       => 'ip_t' );
+$ffi->type( 'object(Netbase::Name)'     => 'name_t' );
+$ffi->type( 'object(Netbase::Question)' => 'question_t' );
+$ffi->type( 'object(Netbase::Message)'  => 'message_t' );
+
+$ffi->bundle;
+
+const our $RRTYPE_A          => dualvar 1,   "A";
+const our $RRTYPE_AAAA       => dualvar 28,  "AAAA";
+const our $RRTYPE_ANY        => dualvar 255, "ANY";
+const our $RRTYPE_IXFR       => dualvar 251, "IXFR";
+const our $RRTYPE_AXFR       => dualvar 252, "AXFR";
+const our $RRTYPE_CAA        => dualvar 257, "CAA";
+const our $RRTYPE_CNAME      => dualvar 5,   "CNAME";
+const our $RRTYPE_DNSKEY     => dualvar 48,  "DNSKEY";
+const our $RRTYPE_DS         => dualvar 43,  "DS";
+const our $RRTYPE_HINFO      => dualvar 13,  "HINFO";
+const our $RRTYPE_HTTPS      => dualvar 65,  "HTTPS";
+const our $RRTYPE_KEY        => dualvar 25,  "KEY";
+const our $RRTYPE_MX         => dualvar 15,  "MX";
+const our $RRTYPE_NAPTR      => dualvar 35,  "NAPTR";
+const our $RRTYPE_NS         => dualvar 2,   "NS";
+const our $RRTYPE_NSEC       => dualvar 47,  "NSEC";
+const our $RRTYPE_NSEC3      => dualvar 50,  "NSEC3";
+const our $RRTYPE_NSEC3PARAM => dualvar 51,  "NSEC3PARAM";
+const our $RRTYPE_NULL       => dualvar 10,  "NULL";
+const our $RRTYPE_OPENPGPKEY => dualvar 61,  "OPENPGPKEY";
+const our $RRTYPE_OPT        => dualvar 41,  "OPT";
+const our $RRTYPE_PTR        => dualvar 12,  "PTR";
+const our $RRTYPE_RRSIG      => dualvar 46,  "RRSIG";
+const our $RRTYPE_SIG        => dualvar 24,  "SIG";
+const our $RRTYPE_SOA        => dualvar 6,   "SOA";
+const our $RRTYPE_SRV        => dualvar 33,  "SRV";
+const our $RRTYPE_SSHFP      => dualvar 44,  "SSHFP";
+const our $RRTYPE_SVCB       => dualvar 64,  "SVCB";
+const our $RRTYPE_TLSA       => dualvar 52,  "TLSA";
+const our $RRTYPE_TSIG       => dualvar 250, "TSIG";
+const our $RRTYPE_TXT        => dualvar 16,  "TXT";
+const our $RRTYPE_ZERO       => dualvar 0,   "ZERO";
+
+const our $E_INTERNAL => dualvar 1001, "INTERNAL_ERROR";
+const our $E_IO       => dualvar 1002, "IO_ERROR";
+const our $E_PROTOCOL => dualvar 1003, "PROTOCOL_ERROR";
+const our $E_TIMEOUT  => dualvar 1004, "TIMEOUT_ERROR";
+
+{
+    my @all_errors = (    #
+        $E_INTERNAL,
+        $E_PROTOCOL,
+        $E_IO,
+        $E_TIMEOUT,
+    );
+    for my $error ( @all_errors ) {
+        $NUM2ERROR{ 0 + $error } = $error;
+        my $name = $error =~ s/(.*)_ERROR/E_$1/m;
+        push @EXPORT_OK, $name;
+        push @{ $EXPORT_TAGS{error} }, $name;
+    }
+
+    my @all_rrtypes = (    #
+        $RRTYPE_A,
+        $RRTYPE_AAAA,
+        $RRTYPE_ANY,
+        $RRTYPE_IXFR,
+        $RRTYPE_AXFR,
+        $RRTYPE_CAA,
+        $RRTYPE_CNAME,
+        $RRTYPE_DNSKEY,
+        $RRTYPE_DS,
+        $RRTYPE_HINFO,
+        $RRTYPE_HTTPS,
+        $RRTYPE_KEY,
+        $RRTYPE_MX,
+        $RRTYPE_NAPTR,
+        $RRTYPE_NS,
+        $RRTYPE_NSEC,
+        $RRTYPE_NSEC3,
+        $RRTYPE_NSEC3PARAM,
+        $RRTYPE_NULL,
+        $RRTYPE_OPENPGPKEY,
+        $RRTYPE_OPT,
+        $RRTYPE_PTR,
+        $RRTYPE_RRSIG,
+        $RRTYPE_SIG,
+        $RRTYPE_SOA,
+        $RRTYPE_SRV,
+        $RRTYPE_SSHFP,
+        $RRTYPE_SVCB,
+        $RRTYPE_TLSA,
+        $RRTYPE_TSIG,
+        $RRTYPE_TXT,
+        $RRTYPE_ZERO,
+    );
+    for my $rrtype ( @all_rrtypes ) {
+        $NAME2RRTYPE{"$rrtype"} = $rrtype;
+        $NUM2RRTYPE{ 0 + $rrtype } = $rrtype;
+        push @EXPORT_OK, "\$RRTYPE_$rrtype";
+        push @{ $EXPORT_TAGS{rrtype} }, "\$RRTYPE_$rrtype";
+    }
+
+    # add all the other ":class" tags to the ":all" class,
+    # deleting duplicates
+    {
+        my %seen;
+        push @{ $EXPORT_TAGS{all} }, grep { !$seen{$_}++ } @{ $EXPORT_TAGS{$_} } foreach keys %EXPORT_TAGS;
+    }
+}
+
+sub ip {
+    my $ip = shift;
+
+    if ( blessed $ip && $ip->isa( 'Netbase::IpAddr' ) ) {
+        return $ip;
+    }
+    return Netbase::IP->new( $ip );
+}
+
+sub name {
+    my $name = shift;
+
+    if ( blessed $name && $name->isa( 'Netbase::Name' ) ) {
+        return $name;
+    }
+    return Netbase::Name->from_ascii( $name );
+}
+
+sub question {
+    my $qname = shift;
+    my $qtype = shift;
+
+    $qname = name( $qname );
+    $qtype = rrtype( $qtype );
+    return Netbase::Question->new( $qname, $qtype );
+}
+
+sub rrtype {
+    my $value = shift;
+
+    if ( looks_like_number( $value ) && $value == "$value" && $value == int( $value ) && $value >= 0 && $value < 65536 ) {
+        return $NUM2RRTYPE{$value} // $value;
+    }
+    elsif ( my $rrtype = $NAME2RRTYPE{$value} ) {
+        if ( !isdual( $value ) || $value + 0 == 0 || $value + 0 == $rrtype ) {
+            return $rrtype;
+        }
+    }
+
+    croak "unrecognized record type name";
+}
+
+package Netbase::Cache;
+
+use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
+
+$ffi->mangler( sub { "netbase_cache_" . shift } );
+
+$ffi->attach( new        => ['string']             => 'cache_t' );
+$ffi->attach( from_bytes => [ 'string', 'buffer' ] => 'cache_t' );
+$ffi->attach(
+    to_bytes => [ 'cache_t', '(usize)->opaque' ],
+    sub {
+        my ( $xsub, $cache ) = @_;
+        my $buffer  = "";
+        my $closure = $ffi->closure(
+            sub {
+                my ( $size ) = @_;
+                grow( $buffer, $size );
+                return scalar_to_pointer $buffer;
+            }
+        );
+        $xsub->( $cache, $closure );
+        return $buffer;
+    }
+);
+$ffi->attach(
+    lookup_udp => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*', '(usize)->opaque' ] => 'message_t',
+    sub {
+        my ( $xsub, $cache, $client, $question, $ip ) = @_;
+        my $start    = 0;
+        my $duration = 0;
+        my $msg_size = 0;
+        my $err_kind = 0;
+        my $err_msg  = "";
+        my $closure  = $ffi->closure(
+            sub {
+                my ( $size ) = @_;
+                grow( $err_msg, $size );
+                return scalar_to_pointer $err_msg;
+            }
+        );
+        my $message = scalar $xsub->( $cache, $client, $question, $ip, \$start, \$duration, \$msg_size, \$err_kind, $closure );
+        if ( $err_kind ) {
+            die {
+                kind           => $NUM2ERROR{$err_kind} // die $E_INTERNAL,
+                message        => $err_msg,
+                query_start    => $start,
+                query_duration => $duration,
+            };
+        }
+        else {
+            return $message, $start, $duration, $msg_size;
+        }
+    }
+);
+$ffi->attach(
+    each_dns_request => [ 'cache_t', '(opaque, opaque)->void' ],
+    sub {
+        my ( $xsub, $cache, $callback ) = @_;
+        my $closure = $ffi->closure(
+            sub {
+                my ( $server, $question ) = @_;
+                $server   = $ffi->cast( 'opaque' => 'ip_t',       $server );
+                $question = $ffi->cast( 'opaque' => 'question_t', $question );
+                $callback->( $server, $question );
+            }
+        );
+        $xsub->( $cache, $closure );
+        return;
+    }
+);
+$ffi->attach( DESTROY => ['cache_t'] );
+
+package Netbase::Client;
+
+use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
+
+$ffi->mangler( sub { "netbase_client_" . shift } );
+
+$ffi->attach( new => [ 'string', 'uint32' ] => 'client_t' );
+$ffi->attach(
+    lookup_udp => [ 'client_t', 'ip_t', 'question_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
+    sub {
+        my ( $xsub, $client, $question, $ip ) = @_;
+        my $query_start    = 0;
+        my $query_duration = 0;
+        my $buffer         = "";
+        my $closure        = $ffi->closure(
+            sub {
+                my ( $size ) = @_;
+                grow( $buffer, $size );
+                return scalar_to_pointer $buffer;
+            }
+        );
+        my $error = $xsub->( $client, $question, $ip, \$query_start, \$query_duration, $closure );
+        if ( $error ) {
+            die {
+                error          => $NUM2ERROR{$error} // die $E_INTERNAL,
+                query_start    => $query_start,
+                query_duration => $query_duration,
+            };
+        }
+        else {
+            return $buffer, $query_start, $query_duration;
+        }
+    }
+);
+$ffi->attach( DESTROY => ['client_t'] );
+
+package Netbase::IP;
+
+$ffi->mangler( sub { "netbase_ip_" . shift } );
+
+$ffi->attach( new       => [ 'string', 'string' ] => 'ip_t' );
+$ffi->attach( to_string => ['ip_t']               => 'string' );
+$ffi->attach( DESTROY   => ['ip_t'] );
+
+use overload '""' => \&to_string;
+
+package Netbase::Name;
+
+$ffi->mangler( sub { "netbase_name_" . shift } );
+
+$ffi->attach( from_ascii => [ 'string', 'string' ] => 'name_t' );
+$ffi->attach( to_string  => ['name_t']             => 'string' );
+$ffi->attach( DESTROY    => ['name_t'] );
+
+use overload '""' => \&to_string;
+
+package Netbase::Question;
+
+$ffi->mangler( sub { "netbase_question_" . shift } );
+
+$ffi->attach( new       => [ 'string', 'name_t', 'u16' ] => 'question_t' );
+$ffi->attach( to_string => ['question_t']                => 'string' );
+$ffi->attach( DESTROY   => ['question_t'] );
+
+use overload '""' => \&to_string;
+
+package Netbase::Message;
+
+$ffi->mangler( sub { "netbase_message_" . shift } );
+
+$ffi->attach( to_string => ['message_t'] => 'string' );
+$ffi->attach( DESTROY   => ['message_t'] );
+
+use overload '""' => \&to_string;
+
+1;

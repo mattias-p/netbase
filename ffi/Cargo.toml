@@ -1,0 +1,17 @@
+[package]
+name = "netbase"
+version = "0.1.0"
+authors = ["Mattias Päivärinta <mattias.paivarinta@iis.se>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+rmp-serde = "0.15.5"
+serde = { version = "1.0", features = ["rc"] }
+serde_bytes = "0.11.5"
+serde_derive = "1.0"
+trust-dns-client = "0.20.3"

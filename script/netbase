@@ -1,0 +1,207 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+
+use Const::Fast;
+use DateTime;
+use File::Slurp qw( read_file write_file );
+use Getopt::Long qw( GetOptionsFromArray );
+use Netbase qw( ip name question );
+
+const my %ALL_COMMANDS => (
+    query => \&do_query,
+    dump  => \&do_dump,
+    list  => \&do_list,
+);
+
+sub do_query {
+    my @args = @_;
+
+    my $opt_network = 0;
+    my $opt_read;
+    my $opt_write;
+    my $opt_update;
+
+    GetOptionsFromArray(
+        \@args,
+        "r|read=s"   => \$opt_read,
+        "w|write=s"  => \$opt_write,
+        "u|update=s" => \$opt_update,
+        "n|network"  => \$opt_network,
+    ) or die "Error in command line arguments\n";
+
+    my $read_file;
+    my $write_file;
+    if ( defined $opt_update ) {
+        if ( defined $opt_read ) {
+            die "Must not specify both --update and --read\n";
+        }
+        if ( defined $opt_write ) {
+            die "Must not specify both --update and --write\n";
+        }
+        $read_file  = $opt_update;
+        $write_file = $opt_update;
+    }
+    else {
+        if ( defined $opt_read ) {
+            $read_file = $opt_read;
+        }
+
+        if ( defined $opt_write ) {
+            $write_file = $opt_write;
+        }
+    }
+
+    my $arg_question = shift( @args ) // die "No question specified\n";
+    my $arg_server   = shift( @args ) // '9.9.9.9';
+
+    if ( @args ) {
+        die "Extra arguments specified\n";
+    }
+
+    my $server   = ip( $arg_server );
+    my $question = parse_question( $arg_question );
+
+    my $net = init_cache( $read_file );
+    my $client;
+    if ( $opt_network ) {
+        $client = Netbase::Client->new();
+    }
+
+    my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( $client, $question, $server ) };
+    show_outcome( $@, $server, $question, $res, $start, $duration, $size );
+
+    if ( $write_file ) {
+        write_file $write_file, $net->to_bytes();
+    }
+
+    return;
+}
+
+sub do_list {
+    my @args = @_;
+
+    my $arg_file = shift( @args ) // die "No cache file specified\n";
+
+    if ( @args ) {
+        die "Extra arguments specified\n";
+    }
+
+    my $net = init_cache( $arg_file );
+
+    $net->each_dns_request(
+        sub {
+            my ( $server, $question ) = @_;
+            print "\@$server $question\n";
+        }
+    );
+
+    return;
+}
+
+sub do_dump {
+    my @args = @_;
+
+    my $arg_file = shift( @args ) // die "No cache file specified\n";
+
+    if ( @args ) {
+        die "Extra arguments specified\n";
+    }
+
+    my $net = init_cache( $arg_file );
+
+    my @queries;
+    $net->each_dns_request(
+        sub {
+            my ( $server, $question ) = @_;
+            my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( undef, $question, $server ) };
+            push @queries, [ $@, $server, $question, $res, $start, $duration, $size ];
+        }
+    );
+    my $first = 1;
+    for my $entry ( sort { $a->[4] <=> $b->[4] } @queries ) {
+        if ( !$first ) {
+            print "\n\n";
+        }
+        show_outcome( @$entry );
+        $first = 0;
+    }
+
+    return;
+}
+
+sub parse_question {
+    my ( $str ) = @_;
+    my ( $qname, $qtype ) = split qr{/}, $str, 2;
+    if ( !defined $qname ) {
+        die "Invalid question format\n";
+    }
+    $qtype //= "A";
+    $qtype = uc $qtype;
+    return question( $qname, $qtype );
+}
+
+sub init_cache {
+    my ( $file, $network ) = @_;
+    my $netbase;
+    if ( $file ) {
+        my $contents = read_file( $file );
+        return Netbase::Cache->from_bytes( $contents );
+    }
+    else {
+        return Netbase::Cache->new();
+    }
+}
+
+sub show_outcome {
+    my ( $error, $server, $question, $res, $start, $duration, $size ) = @_;
+    print "; <<>> netbase <<>> \@$server $question\n";
+
+    if ( $res ) {
+        my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
+        print ";; Got answer:\n";
+        print $res;
+        print "\n";
+        printf ";; Query time: %s msec\n", $duration;
+        printf ";; SERVER: %s#53(%s)\n",   $server, $server;
+        printf ";; WHEN: %s\n",            $dt->strftime( "%a %b %e %T %Z %Y" );
+        printf ";; MSG SIZE  rcvd: %s\n",  $size;
+    }
+    elsif ( $error ) {
+        if ( ref $error ne 'HASH' ) {
+            printf ";; %s\n", $error;
+        }
+        elsif ( $error->{message} ) {
+            printf ";; %s: %s\n", $error->{kind}, $error->{message};
+        }
+        else {
+            printf ";; %s\n", $error->{kind};
+        }
+    }
+    else {
+        print ";; no response: \@$server $question\n";
+    }
+
+    return;
+}
+
+sub main {
+    my @args = @_;
+
+    my $opt_help;
+
+    Getopt::Long::Configure qw( bundling require_order );
+    GetOptionsFromArray( \@args, "h|help" => \$opt_help, )
+      or die "Error in command line arguments\n";
+    Getopt::Long::Configure qw( no_require_order );
+
+    my $command = shift @args // die "Error: no command specified\n";
+    $command = $ALL_COMMANDS{$command} // die "Error: unrecognized command\n";
+    $command->( @args );
+
+    return;
+}
+
+if ( __PACKAGE__ eq 'main' ) {
+    main( @ARGV );
+}
