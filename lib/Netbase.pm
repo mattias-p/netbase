@@ -79,10 +79,11 @@ const our $RRTYPE_TSIG       => dualvar 250, "TSIG";
 const our $RRTYPE_TXT        => dualvar 16,  "TXT";
 const our $RRTYPE_ZERO       => dualvar 0,   "ZERO";
 
-const our $E_INTERNAL => dualvar 1001, "INTERNAL_ERROR";
-const our $E_IO       => dualvar 1002, "IO_ERROR";
-const our $E_PROTOCOL => dualvar 1003, "PROTOCOL_ERROR";
-const our $E_TIMEOUT  => dualvar 1004, "TIMEOUT_ERROR";
+const our $E_INTERNAL => dualvar 1, "INTERNAL_ERROR";
+const our $E_IO       => dualvar 2, "IO_ERROR";
+const our $E_PROTOCOL => dualvar 3, "PROTOCOL_ERROR";
+const our $E_TIMEOUT  => dualvar 4, "TIMEOUT_ERROR";
+const our $E_LOCK     => dualvar 5, "LOCK_ERROR";
 
 {
     my @all_errors = (    #

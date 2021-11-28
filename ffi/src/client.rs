@@ -3,6 +3,7 @@ use crate::trust_dns_ext::MyMessage;
 use rmp_serde as rmps;
 use serde::Deserialize;
 use serde::Serialize;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -33,6 +34,7 @@ pub enum ErrorKind {
     Timeout,
     Protocol,
     Internal,
+    Lock,
 }
 
 impl From<&ClientError> for ErrorKind {
@@ -52,10 +54,11 @@ impl From<&ClientError> for ErrorKind {
 impl From<ErrorKind> for u16 {
     fn from(kind: ErrorKind) -> Self {
         match kind {
-            ErrorKind::Internal => 1001,
-            ErrorKind::Io => 1002,
-            ErrorKind::Protocol => 1003,
-            ErrorKind::Timeout => 1004,
+            ErrorKind::Internal => 1,
+            ErrorKind::Io => 2,
+            ErrorKind::Protocol => 3,
+            ErrorKind::Timeout => 4,
+            ErrorKind::Lock => 5,
         }
     }
 }
@@ -67,6 +70,7 @@ impl fmt::Display for ErrorKind {
             ErrorKind::Io => write!(f, "IO_ERROR"),
             ErrorKind::Protocol => write!(f, "PROTOCOL_ERROR"),
             ErrorKind::Timeout => write!(f, "TIMEOUT_ERROR"),
+            ErrorKind::Lock => write!(f, "LOCK_ERROR"),
         }
     }
 }
@@ -83,12 +87,14 @@ struct Response {
 #[derive(Default)]
 pub struct Cache {
     cache: HashMap<Question, HashMap<IpAddr, Rc<Response>>>,
+    is_reading: Cell<bool>,
 }
 
 impl Cache {
     pub fn new() -> Self {
         Cache {
             cache: HashMap::new(),
+            is_reading: Cell::new(false),
         }
     }
     pub fn lookup_udp(
@@ -101,14 +107,18 @@ impl Cache {
         u32,
         Result<(Rc<Message>, u16), (ErrorKind, Option<ClientError>)>,
     )> {
-        let mut details = None;
         match client {
             None => self
                 .cache
                 .get(&question)
                 .and_then(|inner| inner.get(&server))
-                .cloned(),
+                .cloned()
+                .map(|response| (response, None)),
             Some(ref client) => {
+                if self.is_reading.get() {
+                    return Some((0, 0, Err((ErrorKind::Lock, None))));
+                }
+                let mut details = None;
                 let response = self
                     .cache
                     .entry(question.clone())
@@ -136,10 +146,10 @@ impl Cache {
                         })
                     })
                     .clone();
-                Some(response)
+                Some((response, details))
             }
         }
-        .map(|response| {
+        .map(|(response, details)| {
             (
                 response.query_time,
                 response.query_duration,
@@ -166,11 +176,17 @@ impl Cache {
         )?;
         Ok(Cache {
             cache,
+            is_reading: Cell::new(false),
         })
     }
 
-    pub fn dns_requests(&self) -> impl Iterator<Item=(IpAddr, Question)> + '_ {
-        self.cache.iter().flat_map(|(question, inner)| inner.keys().map(|server| (*server, question.clone())))
+    pub fn each_request(&self, callback: impl FnMut((Question, IpAddr))) {
+        let old_val = self.is_reading.replace(true);
+        self.cache
+            .iter()
+            .flat_map(|(question, inner)| inner.keys().map(|server| (question.clone(), *server)))
+            .for_each(callback);
+        self.is_reading.set(old_val);
     }
 }
 
@@ -194,6 +210,42 @@ impl Client {
 
         let start_time = SystemTime::now();
         let dns_response = UdpClientConnection::new(address).and_then(|conn| {
+            let client = SyncClient::new(conn);
+            client.query(&question.qname, DNSClass::IN, question.qtype)
+        });
+        let end_time = SystemTime::now();
+
+        let query_time = start_time
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards before request")
+            .as_millis() as u64;
+        let query_duration = end_time
+            .duration_since(start_time)
+            .expect("Time went backwards during request")
+            .as_millis() as u32;
+        let bytes = dns_response
+            .map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+
+        (query_time, query_duration, bytes)
+    }
+
+    pub fn lookup_tcp(
+        &self,
+        question: Question,
+        server: IpAddr,
+    ) -> (u64, u32, Result<Vec<u8>, ClientError>) {
+        use std::net::SocketAddr;
+        use std::time::SystemTime;
+        use std::time::UNIX_EPOCH;
+        use trust_dns_client::client::Client;
+        use trust_dns_client::client::SyncClient;
+        use trust_dns_client::rr::DNSClass;
+        use trust_dns_client::tcp::TcpClientConnection;
+
+        let address = SocketAddr::new(server, 53);
+
+        let start_time = SystemTime::now();
+        let dns_response = TcpClientConnection::new(address).and_then(|conn| {
             let client = SyncClient::new(conn);
             client.query(&question.qname, DNSClass::IN, question.qtype)
         });

@@ -125,13 +125,16 @@ pub extern "C" fn netbase_cache_lookup_udp(
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn netbase_cache_each_dns_request(cache: *const CCache, callback: extern fn(*mut CIpAddr, *mut CQuestion)->()) {
+pub extern "C" fn netbase_cache_each_dns_request(
+    cache: *const CCache,
+    callback: extern "C" fn(*mut CIpAddr, *mut CQuestion) -> (),
+) {
     let cache = unsafe { &*(cache as *const Cache) };
-    for (server, question) in cache.dns_requests() {
+    cache.each_request(|(question, server)| {
         let server = Box::into_raw(Box::new(server)) as *mut CIpAddr;
         let question = Box::into_raw(Box::new(question)) as *mut CQuestion;
         callback(server, question);
-    }
+    });
 }
 
 #[allow(non_snake_case)]
