@@ -245,7 +245,7 @@ $ffi->attach(
     }
 );
 $ffi->attach(
-    each_dns_request => [ 'cache_t', '(opaque, opaque)->void' ],
+    for_each_udp_request => [ 'cache_t', '(opaque, opaque)->void' ],
     sub {
         my ( $xsub, $cache, $callback ) = @_;
         my $closure = $ffi->closure(

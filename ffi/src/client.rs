@@ -170,6 +170,7 @@ impl Cache {
             .unwrap();
         buf
     }
+
     pub fn from_vec(buf: Vec<u8>) -> Result<Cache, rmps::decode::Error> {
         let cache = HashMap::<Question, HashMap<IpAddr, Rc<Response>>>::deserialize(
             &mut rmps::Deserializer::new(&buf[..]),
@@ -180,7 +181,7 @@ impl Cache {
         })
     }
 
-    pub fn each_request(&self, callback: impl FnMut((Question, IpAddr))) {
+    pub fn for_each_udp_request(&self, callback: impl FnMut((Question, IpAddr))) {
         let old_val = self.is_reading.replace(true);
         self.cache
             .iter()

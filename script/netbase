@@ -89,7 +89,7 @@ sub do_list {
 
     my $net = init_cache( $arg_file );
 
-    $net->each_dns_request(
+    $net->for_each_udp_request(
         sub {
             my ( $server, $question ) = @_;
             print "\@$server $question\n";
@@ -111,7 +111,7 @@ sub do_dump {
     my $net = init_cache( $arg_file );
 
     my @queries;
-    $net->each_dns_request(
+    $net->for_each_udp_request(
         sub {
             my ( $server, $question ) = @_;
             my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( undef, $question, $server ) };
