@@ -7,8 +7,10 @@ mod trust_dns_ext;
 use crate::client::Cache;
 use crate::client::Client;
 use crate::client::ErrorKind;
+use crate::client::Proto;
 use crate::client::Question;
 use crate::trust_dns_ext::MessageExt;
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ffi::CStr;
@@ -65,7 +67,7 @@ pub extern "C" fn netbase_cache_to_bytes(
 }
 
 #[no_mangle]
-pub extern "C" fn netbase_cache_lookup_udp(
+pub extern "C" fn netbase_cache_lookup(
     cache: *mut CCache,
     client: *const CClient,
     question: *const CQuestion,
@@ -90,7 +92,7 @@ pub extern "C" fn netbase_cache_lookup_udp(
         Some(client)
     };
 
-    if let Some((start, duration, res)) = cache.lookup_udp(client, question.clone(), *server) {
+    if let Some((start, duration, res)) = cache.lookup(client, question.clone(), *server) {
         unsafe {
             *out_start = start;
         }
@@ -125,12 +127,12 @@ pub extern "C" fn netbase_cache_lookup_udp(
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn netbase_cache_for_each_udp_request(
+pub extern "C" fn netbase_cache_for_each_request(
     cache: *const CCache,
     callback: extern "C" fn(*mut CIpAddr, *mut CQuestion) -> (),
 ) {
     let cache = unsafe { &*(cache as *const Cache) };
-    cache.for_each_udp_request(|(question, server)| {
+    cache.for_each_request(|(question, server)| {
         let server = Box::into_raw(Box::new(server)) as *mut CIpAddr;
         let question = Box::into_raw(Box::new(question)) as *mut CQuestion;
         callback(server, question);
@@ -152,7 +154,7 @@ pub extern "C" fn netbase_client_new(_class: *const i8) -> *mut CClient {
 }
 
 #[no_mangle]
-pub extern "C" fn netbase_client_lookup_udp(
+pub extern "C" fn netbase_client_lookup(
     client: *mut CClient,
     question: *const CQuestion,
     server: *const CIpAddr,
@@ -163,7 +165,7 @@ pub extern "C" fn netbase_client_lookup_udp(
     let client = unsafe { &mut *(client as *mut Client) };
     let server = unsafe { *(server as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
-    let (start, duration, res) = client.lookup_udp(question.clone(), server);
+    let (start, duration, res) = client.lookup(question.clone(), server);
     unsafe {
         *query_start = start;
     };
@@ -194,18 +196,22 @@ type CIpAddr = c_void;
 #[no_mangle]
 pub extern "C" fn netbase_ip_new(_class: *const i8, ip: *const i8) -> *mut CIpAddr {
     let ip = unsafe { CStr::from_ptr(ip) };
-    let ip = ip.to_string_lossy().into_owned();
-    Box::into_raw(Box::new(IpAddr::from_str(&ip))) as *mut CIpAddr
+    let ip = ip.to_string_lossy();
+    let ip: &str = ip.borrow();
+    if let Ok(ip) = IpAddr::from_str(ip) {
+        return Box::into_raw(Box::new(ip)) as *mut CIpAddr;
+    }
+    std::ptr::null_mut()
 }
 
 #[no_mangle]
-pub extern "C" fn netbase_ip_to_string(p: *mut CIpAddr) -> *const i8 {
+pub extern "C" fn netbase_ip_to_string(ip: *mut CIpAddr) -> *const i8 {
     thread_local!(
         static KEEP: RefCell<Option<CString>> = RefCell::new(None);
     );
 
-    let p = unsafe { &*(p as *mut IpAddr) };
-    let output = p.to_string();
+    let ip = unsafe { &*(ip as *mut IpAddr) };
+    let output = ip.to_string();
     let output = CString::new(output).unwrap();
     let ptr = output.as_ptr();
     KEEP.with(|k| {
@@ -269,12 +275,16 @@ pub extern "C" fn netbase_question_new(
     _class: *const i8,
     qname: *const CName,
     qtype: u16,
+    proto: u8,
 ) -> *mut CName {
     let qname = unsafe { &*(qname as *const Name) };
     let qtype = RecordType::from(qtype);
-    let question = Question::new(qname.clone(), qtype);
-
-    Box::into_raw(Box::new(question)) as *mut CName
+    if let Ok(proto) = Proto::try_from(proto) {
+        let question = Question::new(qname.clone(), qtype, proto);
+        Box::into_raw(Box::new(question)) as *mut CName
+    } else {
+        std::ptr::null_mut()
+    }
 }
 
 #[no_mangle]
@@ -284,7 +294,7 @@ pub extern "C" fn netbase_question_to_string(p: *mut CQuestion) -> *const i8 {
     );
 
     let p = unsafe { &*(p as *mut Question) };
-    let output = format!("{} {}", &p.qname, p.qtype);
+    let output = format!("{} {} +{}", &p.qname, p.qtype, p.proto);
     let output = CString::new(output).unwrap();
     let ptr = output.as_ptr();
     KEEP.with(|k| {
@@ -337,9 +347,14 @@ mod tests {
 
     #[test]
     fn rust_lib_works() {
-        let question = Question::new(Name::from_str("example.com").unwrap(), RecordType::A);
+        let question = Question::new(
+            Name::from_str("example.com").unwrap(),
+            RecordType::A,
+            Proto::UDP,
+        );
         assert_eq!(question.qname, "example.com".parse().unwrap());
         assert_eq!(question.qtype, RecordType::A);
+        assert_eq!(question.proto, Proto::UDP);
     }
 
     #[test]
@@ -356,14 +371,14 @@ mod tests {
             "example.com"
         );
         let rrtype_a = 1;
-        let question = netbase_question_new(question_class.as_ptr(), name, rrtype_a);
+        let question = netbase_question_new(question_class.as_ptr(), name, rrtype_a, 1);
         assert_eq!(
             unsafe {
                 CStr::from_ptr(netbase_question_to_string(question))
                     .to_string_lossy()
                     .into_owned()
             },
-            "example.com A"
+            "example.com A +UDP"
         );
     }
 }

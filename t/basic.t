@@ -1,7 +1,7 @@
 use Test2::V0;
 use Test2::Tools::Class;
 
-use Netbase qw( ip name question rrtype $RRTYPE_A $RRTYPE_AAAA $RRTYPE_NS $RRTYPE_SOA );
+use Netbase qw( ip name proto question rrtype $RRTYPE_A $RRTYPE_AAAA $RRTYPE_NS $RRTYPE_SOA );
 use Scalar::Util qw( dualvar );
 
 subtest 'Netbase' => sub {
@@ -36,8 +36,8 @@ subtest 'Netbase' => sub {
 
 subtest 'Netbase::IP' => sub {
     subtest 'new()' => sub {
-        my $ip = Netbase::IP->new( "192.0.2.1" );
-        isa_ok $ip, ['Netbase::IP'], 'returns an instance';
+        my $ip1 = Netbase::IP->new( "192.0.2.1" );
+        isa_ok $ip1, ['Netbase::IP'], 'returns an instance';
     };
 
     subtest 'Netbase::Util::ip()' => sub {
@@ -49,9 +49,9 @@ subtest 'Netbase::IP' => sub {
     };
 
     subtest 'stringification' => sub {
-        my $ip = ip( "192.0.2.1" );
-        is $ip->to_string(), "192.0.2.1", 'to_string() returns correct string';
-        is "$ip", "192.0.2.1", 'q("") returns correct string';
+        my $ip1 = ip( "192.0.2.1" );
+        is $ip1->to_string(), "192.0.2.1", 'to_string() returns correct string';
+        is "$ip1", "192.0.2.1", 'q("") returns correct string';
     };
 };
 
@@ -78,21 +78,21 @@ subtest 'Netbase::Name' => sub {
 
 subtest 'Netbase::Question' => sub {
     subtest 'new()' => sub {
-        isa_ok( Netbase::Question->new( name( "example.com" ), rrtype( "A" ) ), ['Netbase::Question'], 'returns an instance' );
+        isa_ok( Netbase::Question->new( name( "example.com" ), rrtype( "A" ), proto( "UDP" ) ), ['Netbase::Question'], 'returns an instance' );
     };
 
     subtest 'Netbase::Util::question()' => sub {
-        my $question1 = question( name( "example.com" ), "A" );
+        my $question1 = question( name( "example.com" ), "A", "UDP" );
         isa_ok $question1, ['Netbase::Question'], 'returns an instance';
 
-        my $question2 = question( "example.com", "A" );
+        my $question2 = question( "example.com", "A", "UDP" );
         isa_ok $question2, ['Netbase::Question'], 'accepts name as string';
     };
 
     subtest 'stringification' => sub {
-        my $question = question( "example.com", "A" );
-        is $question->to_string(), "example.com A", 'to_string() returns correct string';
-        is "$question", "example.com A", 'q("") returns correct string';
+        my $question = question( "example.com", "A", "UDP" );
+        is $question->to_string(), "example.com A +UDP", 'to_string() returns correct string';
+        is "$question", "example.com A +UDP", 'q("") returns correct string';
     };
 };
 
@@ -109,9 +109,9 @@ subtest 'Netbase::Cache' => sub {
         isa_ok $cache, ['Netbase::Cache'], 'returns an instance';
     };
 
-    subtest 'lookup_udp()' => sub {
+    subtest 'lookup()' => sub {
         my $cache = Netbase::Cache->new();
-        my ($response, $start, $duration) = $cache->lookup_udp( undef, question('example.com', 'A'), ip( '192.0.2.1' ) );
+        my ($response, $start, $duration) = $cache->lookup( undef, question('example.com', 'A', "UDP"), ip( '192.0.2.1' ) );
         is $response, undef, "returns undef (not found)";
         is $start, 0, "returns start time 0";
         is $duration, 0, "returns query duration 0";
@@ -123,7 +123,7 @@ subtest 'Netbase::Cache' => sub {
         my $buffer1 = $cache1->to_bytes();
         my $cache2 = Netbase::Cache->from_bytes($buffer1);
         isa_ok $cache2, ['Netbase::Cache'], 'returns an instance';
-        $cache2->lookup_udp( $client, question('paivarinta.se', 'A'), ip( '9.9.9.9' ) );
+        $cache2->lookup( $client, question('paivarinta.se', 'A', "UDP"), ip( '9.9.9.9' ));
         my $buffer2 = $cache2->to_bytes();
         isnt $buffer2, $buffer1;
         my $cache3 = Netbase::Cache->from_bytes($buffer2);

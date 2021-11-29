@@ -14,6 +14,7 @@ use Scalar::Util qw( blessed dualvar isdual looks_like_number );
 our @EXPORT_OK = qw(
   ip
   name
+  proto
   question
   rrtype
 );
@@ -22,6 +23,7 @@ our %EXPORT_TAGS = (
         qw(
           ip
           name
+          proto
           question
           rrtype
         )
@@ -31,6 +33,8 @@ our %EXPORT_TAGS = (
 my %NAME2RRTYPE;
 my %NUM2RRTYPE;
 my %NUM2ERROR;
+my %NAME2PROTO;
+my %NUM2PROTO;
 
 my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
 
@@ -42,6 +46,8 @@ $ffi->type( 'object(Netbase::IP)'       => 'ip_t' );
 $ffi->type( 'object(Netbase::Name)'     => 'name_t' );
 $ffi->type( 'object(Netbase::Question)' => 'question_t' );
 $ffi->type( 'object(Netbase::Message)'  => 'message_t' );
+$ffi->type( 'u16'                       => 'rrtype_t' );
+$ffi->type( 'u8'                        => 'proto_t' );
 
 $ffi->bundle;
 
@@ -84,7 +90,22 @@ const our $E_PROTOCOL => dualvar 3, "PROTOCOL_ERROR";
 const our $E_TIMEOUT  => dualvar 4, "TIMEOUT_ERROR";
 const our $E_LOCK     => dualvar 5, "LOCK_ERROR";
 
+const our $PROTO_UDP => dualvar 1, "UDP";
+const our $PROTO_TCP => dualvar 2, "TCP";
+
 {
+    my @all_protos = (    #
+        $PROTO_UDP,
+        $PROTO_TCP,
+    );
+    for my $proto ( @all_protos ) {
+        $NUM2PROTO{ 0 + $proto } = $proto;
+        $NAME2PROTO{"$proto"} = $proto;
+        my $name = "\$PROTO_$proto";
+        push @EXPORT_OK, $name;
+        push @{ $EXPORT_TAGS{proto} }, $name;
+    }
+
     my @all_errors = (    #
         $E_INTERNAL,
         $E_PROTOCOL,
@@ -93,7 +114,7 @@ const our $E_LOCK     => dualvar 5, "LOCK_ERROR";
     );
     for my $error ( @all_errors ) {
         $NUM2ERROR{ 0 + $error } = $error;
-        my $name = $error =~ s/(.*)_ERROR/E_$1/m;
+        my $name = $error =~ s/(.*)_ERROR/\$E_$1/m;
         push @EXPORT_OK, $name;
         push @{ $EXPORT_TAGS{error} }, $name;
     }
@@ -150,10 +171,25 @@ const our $E_LOCK     => dualvar 5, "LOCK_ERROR";
 sub ip {
     my $ip = shift;
 
-    if ( blessed $ip && $ip->isa( 'Netbase::IpAddr' ) ) {
+    if ( blessed $ip && $ip->isa( 'Netbase::IP' ) ) {
         return $ip;
     }
     return Netbase::IP->new( $ip );
+}
+
+sub proto {
+    my $value = shift;
+
+    if ( looks_like_number( $value ) && $value == "$value" && $value == int( $value ) && $value >= 0 && $value < 256 ) {
+        return $NUM2PROTO{$value} // $value;
+    }
+    elsif ( my $proto = $NAME2PROTO{ uc $value } ) {
+        if ( !isdual( $value ) || $value + 0 == 0 || $value + 0 == $proto ) {
+            return $proto;
+        }
+    }
+
+    return;
 }
 
 sub name {
@@ -168,10 +204,13 @@ sub name {
 sub question {
     my $qname = shift;
     my $qtype = shift;
+    my $proto = shift;
 
     $qname = name( $qname )   // return;
     $qtype = rrtype( $qtype ) // return;
-    return Netbase::Question->new( $qname, $qtype );
+    $proto = proto( $proto )  // return;
+
+    return Netbase::Question->new( $qname, $qtype, $proto );
 }
 
 sub rrtype {
@@ -180,7 +219,7 @@ sub rrtype {
     if ( looks_like_number( $value ) && $value == "$value" && $value == int( $value ) && $value >= 0 && $value < 65536 ) {
         return $NUM2RRTYPE{$value} // $value;
     }
-    elsif ( my $rrtype = $NAME2RRTYPE{uc $value} ) {
+    elsif ( my $rrtype = $NAME2RRTYPE{ uc $value } ) {
         if ( !isdual( $value ) || $value + 0 == 0 || $value + 0 == $rrtype ) {
             return $rrtype;
         }
@@ -214,7 +253,7 @@ $ffi->attach(
     }
 );
 $ffi->attach(
-    lookup_udp => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*', '(usize)->opaque' ] => 'message_t',
+    lookup => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*', '(usize)->opaque' ] => 'message_t',
     sub {
         my ( $xsub, $cache, $client, $question, $ip ) = @_;
         my $start    = 0;
@@ -244,15 +283,15 @@ $ffi->attach(
     }
 );
 $ffi->attach(
-    for_each_udp_request => [ 'cache_t', '(opaque, opaque)->void' ],
+    for_each_request => [ 'cache_t', '(opaque, opaque)->void' ],
     sub {
         my ( $xsub, $cache, $callback ) = @_;
         my $closure = $ffi->closure(
             sub {
-                my ( $server, $question ) = @_;
-                $server   = $ffi->cast( 'opaque' => 'ip_t',       $server );
+                my ( $ip, $question ) = @_;
+                $ip       = $ffi->cast( 'opaque' => 'ip_t',       $ip );
                 $question = $ffi->cast( 'opaque' => 'question_t', $question );
-                $callback->( $server, $question );
+                $callback->( $ip, $question );
             }
         );
         $xsub->( $cache, $closure );
@@ -269,7 +308,7 @@ $ffi->mangler( sub { "netbase_client_" . shift } );
 
 $ffi->attach( new => [ 'string', 'uint32' ] => 'client_t' );
 $ffi->attach(
-    lookup_udp => [ 'client_t', 'ip_t', 'question_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
+    lookup => [ 'client_t', 'ip_t', 'question_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
     sub {
         my ( $xsub, $client, $question, $ip ) = @_;
         my $query_start    = 0;
@@ -321,8 +360,8 @@ package Netbase::Question;
 
 $ffi->mangler( sub { "netbase_question_" . shift } );
 
-$ffi->attach( new       => [ 'string', 'name_t', 'u16' ] => 'question_t' );
-$ffi->attach( to_string => ['question_t']                => 'string' );
+$ffi->attach( new       => [ 'string', 'name_t', 'rrtype_t', 'proto_t' ] => 'question_t' );
+$ffi->attach( to_string => ['question_t']                                => 'string' );
 $ffi->attach( DESTROY   => ['question_t'] );
 
 use overload '""' => \&to_string;

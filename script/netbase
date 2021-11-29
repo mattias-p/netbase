@@ -6,7 +6,7 @@ use Const::Fast;
 use DateTime;
 use File::Slurp qw( read_file write_file );
 use Getopt::Long qw( GetOptionsFromArray );
-use Netbase qw( ip name question rrtype );
+use Netbase qw( ip proto name question rrtype );
 use Pod::Usage qw( pod2usage );
 
 const my %ALL_COMMANDS => (
@@ -62,6 +62,7 @@ sub do_query {
     my $opt_qname;
     my $opt_qtype;
     my $opt_ns;
+    my $opt_proto;
 
     GetOptionsFromArray(
         \@args,
@@ -73,6 +74,7 @@ sub do_query {
         "u|update=s" => \$opt_update,
         "q|qname=s"  => \$opt_qname,
         "t|qtype=s"  => \$opt_qtype,
+        "p|proto=s"   => \$opt_proto,
         "<>"         => sub {
             my ( $value ) = @_;
             if ( rrtype( $value ) ) {
@@ -89,6 +91,7 @@ sub do_query {
             }
         },
     ) or usage_err( "Error in command line arguments", "query" );
+    $opt_proto  //= 'UDP';
 
     do_help( "query" )
       if $opt_help;
@@ -125,6 +128,7 @@ sub do_query {
     my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
     my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
     my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
+    my $proto  = proto( $opt_proto )    // usage_err( "invalid proto given", "query");
 
     my $net = init_cache( $opt_read );
     my $client;
@@ -132,9 +136,9 @@ sub do_query {
         $client = Netbase::Client->new();
     }
 
-    my $question = question( $qname, $qtype );
+    my $question = question( $qname, $qtype, $proto );
 
-    my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( $client, $question, $ns ) };
+    my ( $res, $start, $duration, $size ) = eval { $net->lookup( $client, $question, $ns ) };
     show_outcome( $@, $ns, $question, $res, $start, $duration, $size );
 
     if ( $opt_write ) {
@@ -169,7 +173,7 @@ sub do_list {
 
     my $net = init_cache( $arg_file );
 
-    $net->for_each_udp_request(
+    $net->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
             print "\@$ns $question\n";
@@ -205,10 +209,10 @@ sub do_dump {
     my $net = init_cache( $arg_file );
 
     my @queries;
-    $net->for_each_udp_request(
+    $net->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( undef, $question, $ns ) };
+            my ( $res, $start, $duration, $size ) = eval { $net->lookup( undef, $question, $ns ) };
             push @queries, [ $@, $ns, $question, $res, $start, $duration, $size ];
         }
     );
@@ -362,15 +366,15 @@ netbase query - Perform a single lookup
 
 =head2 USAGE
 
-netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER
+netbase query [options] -n [-r FILE] [-q] NAME [-t] TYPE SERVER
 
-netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER
+netbase query [options] -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER
 
-netbase query -w FILE [-q] NAME [-t] TYPE SERVER
+netbase query [options] -w FILE [-q] NAME [-t] TYPE SERVER
 
-netbase query -u FILE [-q] NAME [-t] TYPE SERVER
+netbase query [options] -u FILE [-q] NAME [-t] TYPE SERVER
 
-=head2 OPTIONS
+=head2 MODE
 
 =over 4
 
@@ -404,6 +408,16 @@ The qname to ask for in the query.
 =item B<-t TYPE>, B<--qtype TYPE>
 
 The qtype to ask for in the query.
+
+=back
+
+=head2 OPTIONS
+
+=over 4
+
+=item B<-p PROTO>, B<--proto PROTO>
+
+The transport protocol to use when sending the request.
 
 =back
 

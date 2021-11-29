@@ -14,17 +14,57 @@ use trust_dns_client::op::Message;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+pub enum Proto {
+    UDP,
+    TCP,
+}
+
+impl TryFrom<u8> for Proto {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Proto::UDP),
+            2 => Ok(Proto::TCP),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<Proto> for u8 {
+    fn from(value: Proto) -> u8 {
+        match value {
+            Proto::UDP => 1,
+            Proto::TCP => 2,
+        }
+    }
+}
+
+impl fmt::Display for Proto {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Proto::TCP => write!(f, "TCP"),
+            Proto::UDP => write!(f, "UDP"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct Question {
     #[serde(with = "trust_dns_ext::custom_serde::binary::name")]
     pub qname: Name,
     #[serde(with = "trust_dns_ext::custom_serde::binary::record_type")]
     pub qtype: RecordType,
+    pub proto: Proto,
 }
 
 impl Question {
-    pub fn new(qname: Name, qtype: RecordType) -> Question {
-        Question { qname, qtype }
+    pub fn new(qname: Name, qtype: RecordType, proto: Proto) -> Question {
+        Question {
+            qname,
+            qtype,
+            proto,
+        }
     }
 }
 
@@ -84,9 +124,10 @@ struct Response {
     outcome: Result<MyMessage, ErrorKind>,
 }
 
-#[derive(Default)]
+#[derive(Default, Deserialize, Serialize)]
 pub struct Cache {
     cache: HashMap<Question, HashMap<IpAddr, Rc<Response>>>,
+    #[serde(skip)]
     is_reading: Cell<bool>,
 }
 
@@ -97,7 +138,7 @@ impl Cache {
             is_reading: Cell::new(false),
         }
     }
-    pub fn lookup_udp(
+    pub fn lookup(
         &mut self,
         client: Option<Rc<Client>>,
         question: Question,
@@ -125,8 +166,7 @@ impl Cache {
                     .or_insert_with(HashMap::new)
                     .entry(server)
                     .or_insert_with(|| {
-                        let (query_time, query_duration, bytes) =
-                            client.lookup_udp(question, server);
+                        let (query_time, query_duration, bytes) = client.lookup(question, server);
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
@@ -165,23 +205,16 @@ impl Cache {
     }
     pub fn to_vec(&self) -> Vec<u8> {
         let mut buf = Vec::new();
-        self.cache
-            .serialize(&mut rmps::Serializer::new(&mut buf))
+        self.serialize(&mut rmps::Serializer::new(&mut buf))
             .unwrap();
         buf
     }
 
     pub fn from_vec(buf: Vec<u8>) -> Result<Cache, rmps::decode::Error> {
-        let cache = HashMap::<Question, HashMap<IpAddr, Rc<Response>>>::deserialize(
-            &mut rmps::Deserializer::new(&buf[..]),
-        )?;
-        Ok(Cache {
-            cache,
-            is_reading: Cell::new(false),
-        })
+        Cache::deserialize(&mut rmps::Deserializer::new(&buf[..]))
     }
 
-    pub fn for_each_udp_request(&self, callback: impl FnMut((Question, IpAddr))) {
+    pub fn for_each_request(&self, callback: impl FnMut((Question, IpAddr))) {
         let old_val = self.is_reading.replace(true);
         self.cache
             .iter()
@@ -194,43 +227,7 @@ impl Cache {
 pub struct Client;
 
 impl Client {
-    pub fn lookup_udp(
-        &self,
-        question: Question,
-        server: IpAddr,
-    ) -> (u64, u32, Result<Vec<u8>, ClientError>) {
-        use std::net::SocketAddr;
-        use std::time::SystemTime;
-        use std::time::UNIX_EPOCH;
-        use trust_dns_client::client::Client;
-        use trust_dns_client::client::SyncClient;
-        use trust_dns_client::rr::DNSClass;
-        use trust_dns_client::udp::UdpClientConnection;
-
-        let address = SocketAddr::new(server, 53);
-
-        let start_time = SystemTime::now();
-        let dns_response = UdpClientConnection::new(address).and_then(|conn| {
-            let client = SyncClient::new(conn);
-            client.query(&question.qname, DNSClass::IN, question.qtype)
-        });
-        let end_time = SystemTime::now();
-
-        let query_time = start_time
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards before request")
-            .as_millis() as u64;
-        let query_duration = end_time
-            .duration_since(start_time)
-            .expect("Time went backwards during request")
-            .as_millis() as u32;
-        let bytes = dns_response
-            .map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
-
-        (query_time, query_duration, bytes)
-    }
-
-    pub fn lookup_tcp(
+    pub fn lookup(
         &self,
         question: Question,
         server: IpAddr,
@@ -242,16 +239,21 @@ impl Client {
         use trust_dns_client::client::SyncClient;
         use trust_dns_client::rr::DNSClass;
         use trust_dns_client::tcp::TcpClientConnection;
+        use trust_dns_client::udp::UdpClientConnection;
 
         let address = SocketAddr::new(server, 53);
-
         let start_time = SystemTime::now();
-        let dns_response = TcpClientConnection::new(address).and_then(|conn| {
-            let client = SyncClient::new(conn);
-            client.query(&question.qname, DNSClass::IN, question.qtype)
-        });
+        let dns_response = match question.proto {
+            Proto::TCP => UdpClientConnection::new(address).and_then(|conn| {
+                let client = SyncClient::new(conn);
+                client.query(&question.qname, DNSClass::IN, question.qtype)
+            }),
+            Proto::UDP => TcpClientConnection::new(address).and_then(|conn| {
+                let client = SyncClient::new(conn);
+                client.query(&question.qname, DNSClass::IN, question.qtype)
+            }),
+        };
         let end_time = SystemTime::now();
-
         let query_time = start_time
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards before request")
