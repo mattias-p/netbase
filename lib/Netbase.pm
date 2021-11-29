@@ -6,7 +6,6 @@ use 5.014;
 
 our $VERSION = '0.01';
 
-use Carp qw( croak );
 use Const::Fast;
 use Exporter qw( import );
 use FFI::Platypus 1.00;
@@ -170,8 +169,8 @@ sub question {
     my $qname = shift;
     my $qtype = shift;
 
-    $qname = name( $qname );
-    $qtype = rrtype( $qtype );
+    $qname = name( $qname )   // return;
+    $qtype = rrtype( $qtype ) // return;
     return Netbase::Question->new( $qname, $qtype );
 }
 
@@ -181,13 +180,13 @@ sub rrtype {
     if ( looks_like_number( $value ) && $value == "$value" && $value == int( $value ) && $value >= 0 && $value < 65536 ) {
         return $NUM2RRTYPE{$value} // $value;
     }
-    elsif ( my $rrtype = $NAME2RRTYPE{$value} ) {
+    elsif ( my $rrtype = $NAME2RRTYPE{uc $value} ) {
         if ( !isdual( $value ) || $value + 0 == 0 || $value + 0 == $rrtype ) {
             return $rrtype;
         }
     }
 
-    croak "unrecognized record type name";
+    return;
 }
 
 package Netbase::Cache;

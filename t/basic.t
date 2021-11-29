@@ -26,11 +26,11 @@ subtest 'Netbase' => sub {
     };
 
     subtest 'invalid rrtypes' => sub {
-        like(dies { rrtype( "FOOBAR" ) }, qr/unrecognized/, 'undefined record type name');
-        like(dies { rrtype( -1 ) }, qr/unrecognized/, 'out of range');
-        like(dies { rrtype( 65537 ) }, qr/unrecognized/, 'out of range');
-        like(dies { rrtype( 2.1 ) }, qr/unrecognized/, 'fractional number');
-        like(dies { rrtype( dualvar(1, "NS") ) }, qr/unrecognized/, 'inconsistent dual number');
+        is rrtype( "FOOBAR" ), undef, qr/unrecognized/, 'undefined record type name';
+        is rrtype( -1 ), undef, qr/unrecognized/, 'out of range';
+        is rrtype( 65537 ), undef, qr/unrecognized/, 'out of range';
+        is rrtype( 2.1 ), undef, qr/unrecognized/, 'fractional number';
+        is rrtype( dualvar(1, "NS") ), undef, qr/unrecognized/, 'inconsistent dual number';
     };
 };
 

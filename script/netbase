@@ -6,7 +6,8 @@ use Const::Fast;
 use DateTime;
 use File::Slurp qw( read_file write_file );
 use Getopt::Long qw( GetOptionsFromArray );
-use Netbase qw( ip name question );
+use Netbase qw( ip name question rrtype );
+use Pod::Usage qw( pod2usage );
 
 const my %ALL_COMMANDS => (
     query => \&do_query,
@@ -14,65 +15,130 @@ const my %ALL_COMMANDS => (
     list  => \&do_list,
 );
 
+sub main {
+    my @args = @_;
+
+    my $opt_help;
+    my $opt_man;
+
+    Getopt::Long::Configure qw( bundling require_order );
+    GetOptionsFromArray(
+        \@args,
+        "h|help" => \$opt_help,
+        "man"    => \$opt_man,
+    ) or pod2usage( -verbose => 0 );
+    Getopt::Long::Configure qw( no_require_order );
+
+    my $cmd_name = shift @args;
+    my $cmd_sub  = (
+        exists $ALL_COMMANDS{$cmd_name}
+        ? $ALL_COMMANDS{$cmd_name}
+        : usage_err( "Unrecognized command" )
+      )
+      if defined $cmd_name;
+
+    do_help( $cmd_name )
+      if $opt_help;
+    pod2usage( -verbose => 2 )
+      if $opt_man;
+
+    usage_err( "No command specified" )
+      if !defined $cmd_sub;
+
+    $cmd_sub->( @args );
+
+    return;
+}
+
 sub do_query {
     my @args = @_;
 
-    my $opt_network = 0;
+    my $opt_help;
+    my $opt_man;
     my $opt_read;
     my $opt_write;
     my $opt_update;
+    my $opt_network;
+    my $opt_qname;
+    my $opt_qtype;
+    my $opt_ns;
 
     GetOptionsFromArray(
         \@args,
+        "h|help" => \$opt_help,
+        "man"    => \$opt_man,
+        "n|network"  => \$opt_network,
         "r|read=s"   => \$opt_read,
         "w|write=s"  => \$opt_write,
         "u|update=s" => \$opt_update,
-        "n|network"  => \$opt_network,
-    ) or die "Error in command line arguments\n";
+        "q|qname=s"  => \$opt_qname,
+        "t|qtype=s"  => \$opt_qtype,
+        "<>"         => sub {
+            my ( $value ) = @_;
+            if ( rrtype( $value ) ) {
+                $opt_qtype = $value;
+            }
+            elsif ( name( $value ) ) {
+                $opt_qname = $value;
+            }
+            elsif ( parse_ns( $value ) ) {
+                $opt_ns = $value;
+            }
+            else {
+                usage_err( "Invalid argument: $value", "query" );
+            }
+        },
+    ) or usage_err( "Error in command line arguments", "query" );
 
-    my $read_file;
-    my $write_file;
+    do_help( "query" )
+      if $opt_help;
+    pod2usage( -verbose => 2 )
+      if $opt_man;
+
+    usage_err( "No qname specified", "query" )
+      if !defined $opt_qname;
+
+    usage_err( "No qtype specified", "query" )
+      if !defined $opt_qtype;
+
+    usage_err( "No server specified", "query" )
+      if !defined $opt_ns;
+
     if ( defined $opt_update ) {
-        if ( defined $opt_read ) {
-            die "Must not specify both --update and --read\n";
-        }
-        if ( defined $opt_write ) {
-            die "Must not specify both --update and --write\n";
-        }
-        $read_file  = $opt_update;
-        $write_file = $opt_update;
-    }
-    else {
-        if ( defined $opt_read ) {
-            $read_file = $opt_read;
-        }
+        usage_err( "Must not specify both --update and --read", "query" )
+          if defined $opt_read;
 
-        if ( defined $opt_write ) {
-            $write_file = $opt_write;
-        }
+        usage_err( "Must not specify both --update and --write", "query" )
+          if defined $opt_write;
+
+        $opt_read  = $opt_update;
+        $opt_write = $opt_update;
     }
 
-    my $arg_question = shift( @args ) // die "No question specified\n";
-    my $arg_server   = shift( @args ) // '9.9.9.9';
-
-    if ( @args ) {
-        die "Extra arguments specified\n";
+    if ( defined $opt_write ) {
+        $opt_network = 1;
     }
 
-    my $server   = ip( $arg_server );
-    my $question = parse_question( $arg_question );
+    usage_err( "Must specify at least one of --network, --read, --write or --update", "query" )
+      if !defined $opt_network && !defined $opt_read;
 
-    my $net = init_cache( $read_file );
+    my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
+    my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
+    my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
+
+    my $net = init_cache( $opt_read );
     my $client;
-    if ( $opt_network ) {
+    if ( defined $opt_network ) {
         $client = Netbase::Client->new();
     }
 
-    my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( $client, $question, $server ) };
-    show_outcome( $@, $server, $question, $res, $start, $duration, $size );
+    my $question = question( $qname, $qtype );
 
-    if ( $write_file ) {
-        write_file $write_file, $net->to_bytes();
+    my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( $client, $question, $ns ) };
+    show_outcome( $@, $ns, $question, $res, $start, $duration, $size );
+
+    if ( $opt_write ) {
+        write_file $opt_write, $net->to_bytes();
     }
 
     return;
@@ -81,18 +147,32 @@ sub do_query {
 sub do_list {
     my @args = @_;
 
-    my $arg_file = shift( @args ) // die "No cache file specified\n";
+    my $opt_help;
+    my $opt_man;
+    GetOptionsFromArray(
+        \@args,
+        "h|help" => \$opt_help,
+        "man"    => \$opt_man,
+    ) or usage_err( "Error in command line arguments", "list" );
+
+    do_help( "list" )
+      if $opt_help;
+    pod2usage( -verbose => 2 )
+      if $opt_man;
+
+    my $arg_file = shift( @args )    #
+      // usage_err( "No cache file specified", "list" );
 
     if ( @args ) {
-        die "Extra arguments specified\n";
+        usage_err( "Extra arguments specified", "dump" );
     }
 
     my $net = init_cache( $arg_file );
 
     $net->for_each_udp_request(
         sub {
-            my ( $server, $question ) = @_;
-            print "\@$server $question\n";
+            my ( $ns, $question ) = @_;
+            print "\@$ns $question\n";
         }
     );
 
@@ -102,10 +182,24 @@ sub do_list {
 sub do_dump {
     my @args = @_;
 
-    my $arg_file = shift( @args ) // die "No cache file specified\n";
+    my $opt_help;
+    my $opt_man;
+    GetOptionsFromArray(
+        \@args,
+        "h|help" => \$opt_help,
+        "man"    => \$opt_man,
+    ) or usage_err( "Error in command line arguments", "dump" );
+
+    do_help( "dump" )
+      if $opt_help;
+    pod2usage( -verbose => 2 )
+      if $opt_man;
+
+    my $arg_file = shift( @args )    #
+      // usage_err( "No cache file specified", "dump" );
 
     if ( @args ) {
-        die "Extra arguments specified\n";
+        usage_err( "Extra arguments specified", "dump" );
     }
 
     my $net = init_cache( $arg_file );
@@ -113,9 +207,9 @@ sub do_dump {
     my @queries;
     $net->for_each_udp_request(
         sub {
-            my ( $server, $question ) = @_;
-            my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( undef, $question, $server ) };
-            push @queries, [ $@, $server, $question, $res, $start, $duration, $size ];
+            my ( $ns, $question ) = @_;
+            my ( $res, $start, $duration, $size ) = eval { $net->lookup_udp( undef, $question, $ns ) };
+            push @queries, [ $@, $ns, $question, $res, $start, $duration, $size ];
         }
     );
     my $first = 1;
@@ -130,20 +224,8 @@ sub do_dump {
     return;
 }
 
-sub parse_question {
-    my ( $str ) = @_;
-    my ( $qname, $qtype ) = split qr{/}, $str, 2;
-    if ( !defined $qname ) {
-        die "Invalid question format\n";
-    }
-    $qtype //= "A";
-    $qtype = uc $qtype;
-    return question( $qname, $qtype );
-}
-
 sub init_cache {
-    my ( $file, $network ) = @_;
-    my $netbase;
+    my ( $file ) = @_;
     if ( $file ) {
         my $contents = read_file( $file );
         return Netbase::Cache->from_bytes( $contents );
@@ -153,9 +235,19 @@ sub init_cache {
     }
 }
 
+sub parse_ns {
+    my ( $value ) = @_;
+    if ( $value =~ /^@(.*)$/ ) {
+        return ip( $1 );
+    }
+    else {
+        return;
+    }
+}
+
 sub show_outcome {
-    my ( $error, $server, $question, $res, $start, $duration, $size ) = @_;
-    print "; <<>> netbase <<>> \@$server $question\n";
+    my ( $error, $ns, $question, $res, $start, $duration, $size ) = @_;
+    print "; <<>> netbase <<>> \@$ns $question\n";
 
     if ( $res ) {
         my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
@@ -163,7 +255,7 @@ sub show_outcome {
         print $res;
         print "\n";
         printf ";; Query time: %s msec\n", $duration;
-        printf ";; SERVER: %s#53(%s)\n",   $server, $server;
+        printf ";; SERVER: %s#53(%s)\n",   $ns, $ns;
         printf ";; WHEN: %s\n",            $dt->strftime( "%a %b %e %T %Z %Y" );
         printf ";; MSG SIZE  rcvd: %s\n",  $size;
     }
@@ -179,25 +271,33 @@ sub show_outcome {
         }
     }
     else {
-        print ";; no response: \@$server $question\n";
+        print ";; no response: \@$ns $question\n";
     }
 
     return;
 }
 
-sub main {
-    my @args = @_;
+sub do_help {
+    my ( $cmd_name ) = @_;
 
-    my $opt_help;
+    if ( defined $cmd_name ) {
+        pod2usage( -verbose => 99, -sections => "COMMAND netbase $cmd_name" );
+    } else {
+        pod2usage( -verbose => 99, -sections => "NAME|SYNOPSIS|OPTIONS|COMMANDS|DESCRIPTION" );
+    }
 
-    Getopt::Long::Configure qw( bundling require_order );
-    GetOptionsFromArray( \@args, "h|help" => \$opt_help, )
-      or die "Error in command line arguments\n";
-    Getopt::Long::Configure qw( no_require_order );
+    return;
+}
 
-    my $command = shift @args // die "Error: no command specified\n";
-    $command = $ALL_COMMANDS{$command} // die "Error: unrecognized command\n";
-    $command->( @args );
+sub usage_err {
+    my ( $message, $cmd_name ) = @_;
+
+    if ( defined $cmd_name ) {
+        pod2usage( -msg => "netbase: $message", -verbose => 99, -sections => "COMMAND netbase $cmd_name/USAGE" );
+    }
+    else {
+        pod2usage( "netbase: $message" )
+    }
 
     return;
 }
@@ -205,3 +305,163 @@ sub main {
 if ( __PACKAGE__ eq 'main' ) {
     main( @ARGV );
 }
+
+=head1 NAME
+
+netbase - DNS cache lookup utility
+
+=head1 SYNOPSIS
+
+netbase --help
+
+netbase --help COMMAND
+
+netbase --man
+
+netbase COMMAND [COMMAND_OPT...]
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help>
+
+Print a brief help message and exit.
+If no command is given the help message concerns B<netbase> itself.
+If a command is given the help message concerns that command.
+
+=item B<--man>
+
+Print the full manual page and exit.
+
+=back
+
+=head1 COMMANDS
+
+=over 4
+
+=item B<query>
+
+Make a single query.
+
+=item B<list>
+
+List all requests in the cache.
+
+=item B<dump>
+
+Dump all requests in the cache, along with their outcomes.
+
+=back
+
+=head1 COMMAND netbase query
+
+=head2 SUBCOMMAND
+
+netbase query - Perform a single lookup
+
+=head2 USAGE
+
+netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER
+
+netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER
+
+netbase query -w FILE [-q] NAME [-t] TYPE SERVER
+
+netbase query -u FILE [-q] NAME [-t] TYPE SERVER
+
+=head2 OPTIONS
+
+=over 4
+
+=item B<-n>, B<--network>
+
+If the given request is not answered in the cache, send the request over the
+network and record the outcome in the cache.
+
+=item B<-r FILE>, B<--read FILE>
+
+Initialize the cache from the given FILE.
+Must not be combined B<--update>.
+By default the cache is initialized to be empty.
+
+=item B<-w FILE>, B<--write FILE>
+
+After the lookup, save the cache to the given FILE.
+By default any changes to the cache are dropped.
+Implicitly sets B<--network>.
+Must not be combined B<--update>.
+
+=item B<-u FILE>, B<--update FILE>
+
+Short for B<--read FILE --write FILE>.
+Must not be combined with B<--read> nor with B<--write>.
+
+=item B<-q NAME>, B<--qname NAME>
+
+The qname to ask for in the query.
+
+=item B<-t TYPE>, B<--qtype TYPE>
+
+The qtype to ask for in the query.
+
+=back
+
+=head2 ARGUMENTS
+
+=over 4
+
+=item B<TYPE>
+
+Short for B<--qtype TYPE>.
+
+=item B<NAME>
+
+Short for B<--qname NAME>.
+
+B<Note>: When using this syntax NAME must not be a valid TYPE or it will be interpreted
+as a TYPE.
+
+=item B<SERVER>
+
+The syntax for a SERVER is an at-sign (@) immediately followed by an IP address.
+
+=back
+
+=head1 COMMAND netbase list
+
+=head2 USAGE
+
+netbase list FILE
+
+=head2 ARGUMENTS
+
+=over 4
+
+=item B<FILE>
+
+Initialize the cache from the given FILE.
+
+=back
+
+=head1 COMMAND netbase dump
+
+=head2 USAGE
+
+netbase dump FILE
+
+=head2 ARGUMENTS
+
+=over 4
+
+=item B<FILE>
+
+Initialize the cache from the given FILE.
+
+=back
+
+=head1 DESCRIPTION
+
+Reads and writes DNS cache files and makes single DNS queries.
+
+=cut
