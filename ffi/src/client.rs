@@ -117,6 +117,7 @@ impl fmt::Display for ErrorKind {
 
 #[derive(Debug, Eq, PartialEq, Deserialize, Serialize)]
 struct Response {
+    failures: Vec<Failure>,
     /// Millis since epoch
     query_time: u64,
     /// Millis
@@ -138,9 +139,10 @@ impl Cache {
             is_reading: Cell::new(false),
         }
     }
+
     pub fn lookup(
         &mut self,
-        client: Option<Rc<Client>>,
+        net: Option<Rc<Net>>,
         question: Question,
         server: IpAddr,
     ) -> Option<(
@@ -148,14 +150,14 @@ impl Cache {
         u32,
         Result<(Rc<Message>, u16), (ErrorKind, Option<ClientError>)>,
     )> {
-        match client {
+        match net {
             None => self
                 .cache
                 .get(&question)
                 .and_then(|inner| inner.get(&server))
                 .cloned()
                 .map(|response| (response, None)),
-            Some(ref client) => {
+            Some(ref net) => {
                 if self.is_reading.get() {
                     return Some((0, 0, Err((ErrorKind::Lock, None))));
                 }
@@ -166,7 +168,8 @@ impl Cache {
                     .or_insert_with(HashMap::new)
                     .entry(server)
                     .or_insert_with(|| {
-                        let (query_time, query_duration, bytes) = client.lookup(question, server);
+                        let (failures, query_time, query_duration, bytes) =
+                            net.lookup(question, server);
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
@@ -180,6 +183,7 @@ impl Cache {
                             }
                         };
                         Rc::new(Response {
+                            failures,
                             query_time,
                             query_duration,
                             outcome,
@@ -203,6 +207,7 @@ impl Cache {
             )
         })
     }
+
     pub fn to_vec(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         self.serialize(&mut rmps::Serializer::new(&mut buf))
@@ -222,17 +227,49 @@ impl Cache {
             .for_each(callback);
         self.is_reading.set(old_val);
     }
+
+    pub fn for_each_retry(
+        &self,
+        question: &Question,
+        server: &IpAddr,
+        mut callback: impl FnMut(u64, u32, ErrorKind),
+    ) {
+        let old_val = self.is_reading.replace(true);
+        self.cache
+            .get(question)
+            .and_then(|inner| inner.get(server))
+            .iter()
+            .flat_map(|response| &response.failures)
+            .for_each(|failure| {
+                callback(failure.query_start, failure.query_duration, failure.kind)
+            });
+        self.is_reading.set(old_val);
+    }
 }
 
-pub struct Client;
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Failure {
+    query_start: u64,
+    query_duration: u32,
+    kind: ErrorKind,
+}
 
-impl Client {
+#[derive(Debug)]
+pub struct Net {
+    pub retry: u16,
+    pub retrans: u16,
+}
+
+impl Net {
     pub fn lookup(
         &self,
         question: Question,
         server: IpAddr,
-    ) -> (u64, u32, Result<Vec<u8>, ClientError>) {
+    ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ClientError>) {
+        use std::iter;
         use std::net::SocketAddr;
+        use std::thread;
+        use std::time::Duration;
         use std::time::SystemTime;
         use std::time::UNIX_EPOCH;
         use trust_dns_client::client::Client;
@@ -242,29 +279,50 @@ impl Client {
         use trust_dns_client::udp::UdpClientConnection;
 
         let address = SocketAddr::new(server, 53);
-        let start_time = SystemTime::now();
-        let dns_response = match question.proto {
-            Proto::TCP => UdpClientConnection::new(address).and_then(|conn| {
-                let client = SyncClient::new(conn);
-                client.query(&question.qname, DNSClass::IN, question.qtype)
-            }),
-            Proto::UDP => TcpClientConnection::new(address).and_then(|conn| {
-                let client = SyncClient::new(conn);
-                client.query(&question.qname, DNSClass::IN, question.qtype)
-            }),
-        };
-        let end_time = SystemTime::now();
-        let query_time = start_time
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards before request")
-            .as_millis() as u64;
-        let query_duration = end_time
-            .duration_since(start_time)
-            .expect("Time went backwards during request")
-            .as_millis() as u32;
-        let bytes = dns_response
-            .map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
-
-        (query_time, query_duration, bytes)
+        let mut tries_left = self.retry;
+        let retrans = self.retrans;
+        let mut queries = iter::repeat_with(|| {
+            let start_time = SystemTime::now();
+            let outcome = match question.proto {
+                Proto::TCP => UdpClientConnection::new(address).and_then(|conn| {
+                    let client = SyncClient::new(conn);
+                    client.query(&question.qname, DNSClass::IN, question.qtype)
+                }),
+                Proto::UDP => TcpClientConnection::new(address).and_then(|conn| {
+                    let client = SyncClient::new(conn);
+                    client.query(&question.qname, DNSClass::IN, question.qtype)
+                }),
+            };
+            let end_time = SystemTime::now();
+            let query_duration = end_time
+                .duration_since(start_time)
+                .expect("Time went backwards during request")
+                .as_millis() as u32;
+            let query_time = start_time
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards before request")
+                .as_millis() as u64;
+            (outcome, query_time, query_duration)
+        });
+        let failures: Vec<_> = queries
+            .map_while(|(outcome, query_start, query_duration)| {
+                tries_left = tries_left.saturating_sub(1);
+                match outcome {
+                    Err(failure) if tries_left > 0 => {
+                        thread::sleep(Duration::from_secs(retrans as u64));
+                        Some(Failure {
+                            query_start,
+                            query_duration,
+                            kind: (&failure).into(),
+                        })
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        let (outcome, query_start, query_duration) = queries.next().unwrap();
+        let bytes =
+            outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+        (failures, query_start, query_duration, bytes)
     }
 }

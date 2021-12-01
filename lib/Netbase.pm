@@ -41,7 +41,7 @@ my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
 $ffi->load_custom_type( '::PointerSizeBuffer' => 'buffer' );
 
 $ffi->type( 'object(Netbase::Cache)'    => 'cache_t' );
-$ffi->type( 'object(Netbase::Client)'   => 'client_t' );
+$ffi->type( 'object(Netbase::Net)'      => 'net_t' );
 $ffi->type( 'object(Netbase::IP)'       => 'ip_t' );
 $ffi->type( 'object(Netbase::Name)'     => 'name_t' );
 $ffi->type( 'object(Netbase::Question)' => 'question_t' );
@@ -268,18 +268,14 @@ $ffi->attach(
                 return scalar_to_pointer $err_msg;
             }
         );
+        if ( defined $client ) {
+            $client = $ffi->cast( 'net_t' => 'opaque', $client );
+        }
         my $message = scalar $xsub->( $cache, $client, $question, $ip, \$start, \$duration, \$msg_size, \$err_kind, $closure );
         if ( $err_kind ) {
-            die {
-                kind           => $NUM2ERROR{$err_kind} // die $E_INTERNAL,
-                message        => $err_msg,
-                query_start    => $start,
-                query_duration => $duration,
-            };
+            $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
         }
-        else {
-            return $message, $start, $duration, $msg_size;
-        }
+        return ( $message, $err_kind, $start, $duration, $msg_size, $err_msg );
     }
 );
 $ffi->attach(
@@ -298,17 +294,32 @@ $ffi->attach(
         return;
     }
 );
+$ffi->attach(
+    for_each_retry => [ 'cache_t', 'question_t', 'ip_t', '(u64, u32, u32)->void' ],
+    sub {
+        my ( $xsub, $cache, $question, $server, $callback ) = @_;
+        my $closure = $ffi->closure(
+            sub {
+                my ( $start, $duration, $error ) = @_;
+                $error = $NUM2ERROR{$error} // $E_INTERNAL;
+                $callback->( $start, $duration, $error );
+            }
+        );
+        $xsub->( $cache, $question, $server, $closure );
+        return;
+    }
+);
 $ffi->attach( DESTROY => ['cache_t'] );
 
-package Netbase::Client;
+package Netbase::Net;
 
 use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
 
-$ffi->mangler( sub { "netbase_client_" . shift } );
+$ffi->mangler( sub { "netbase_net_" . shift } );
 
-$ffi->attach( new => [ 'string', 'uint32' ] => 'client_t' );
+$ffi->attach( new => [ 'string', 'u16', 'u16' ] => 'net_t' );
 $ffi->attach(
-    lookup => [ 'client_t', 'ip_t', 'question_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
+    lookup => [ 'net_t', 'question_t', 'ip_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
     sub {
         my ( $xsub, $client, $question, $ip ) = @_;
         my $query_start    = 0;
@@ -321,10 +332,11 @@ $ffi->attach(
                 return scalar_to_pointer $buffer;
             }
         );
+
         my $error = $xsub->( $client, $question, $ip, \$query_start, \$query_duration, $closure );
         if ( $error ) {
             die {
-                error          => $NUM2ERROR{$error} // die $E_INTERNAL,
+                error          => $NUM2ERROR{$error} // $E_INTERNAL,
                 query_start    => $query_start,
                 query_duration => $query_duration,
             };
@@ -334,7 +346,7 @@ $ffi->attach(
         }
     }
 );
-$ffi->attach( DESTROY => ['client_t'] );
+$ffi->attach( DESTROY => ['net_t'] );
 
 package Netbase::IP;
 

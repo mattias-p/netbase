@@ -128,21 +128,20 @@ sub do_query {
     my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
     my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
     my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
-    my $proto  = proto( $opt_proto )    // usage_err( "invalid proto given", "query");
+    my $proto = proto( $opt_proto )  // usage_err( "invalid proto given",               "query" );
 
-    my $net = init_cache( $opt_read );
-    my $client;
+    my $cache = init_cache( $opt_read );
+    my $net;
     if ( defined $opt_network ) {
-        $client = Netbase::Client->new();
+        $net = Netbase::Net->new(3, 1);
     }
 
     my $question = question( $qname, $qtype, $proto );
 
-    my ( $res, $start, $duration, $size ) = eval { $net->lookup( $client, $question, $ns ) };
-    show_outcome( $@, $ns, $question, $res, $start, $duration, $size );
+    show_outcome( $question, $ns, $cache->lookup( $net, $question, $ns ) );
 
     if ( $opt_write ) {
-        write_file $opt_write, $net->to_bytes();
+        write_file $opt_write, $cache->to_bytes();
     }
 
     return;
@@ -171,9 +170,9 @@ sub do_list {
         usage_err( "Extra arguments specified", "dump" );
     }
 
-    my $net = init_cache( $arg_file );
+    my $cache = init_cache( $arg_file );
 
-    $net->for_each_request(
+    $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
             print "\@$ns $question\n";
@@ -183,6 +182,7 @@ sub do_list {
     return;
 }
 
+use Data::Dumper;
 sub do_dump {
     my @args = @_;
 
@@ -206,14 +206,21 @@ sub do_dump {
         usage_err( "Extra arguments specified", "dump" );
     }
 
-    my $net = init_cache( $arg_file );
+    my $cache = init_cache( $arg_file );
 
     my @queries;
-    $net->for_each_request(
+    $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            my ( $res, $start, $duration, $size ) = eval { $net->lookup( undef, $question, $ns ) };
-            push @queries, [ $@, $ns, $question, $res, $start, $duration, $size ];
+            push @queries, [ $question, $ns, $cache->lookup( undef, $question, $ns ) ];
+            $cache->for_each_retry(
+                $question,
+                $ns,
+                sub {
+                    my ( $start, $duration, $err_kind ) = @_;
+                    push @queries, [ $question, $ns, undef, $err_kind, $start, $duration, 0, undef ];
+                }
+            );
         }
     );
     my $first = 1;
@@ -248,35 +255,33 @@ sub parse_ns {
         return;
     }
 }
-
 sub show_outcome {
-    my ( $error, $ns, $question, $res, $start, $duration, $size ) = @_;
+    my ( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
     print "; <<>> netbase <<>> \@$ns $question\n";
 
-    if ( $res ) {
-        my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
+    my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
+    if ( $message ) {
         print ";; Got answer:\n";
-        print $res;
+        print $message;
         print "\n";
-        printf ";; Query time: %s msec\n", $duration;
-        printf ";; SERVER: %s#53(%s)\n",   $ns, $ns;
-        printf ";; WHEN: %s\n",            $dt->strftime( "%a %b %e %T %Z %Y" );
         printf ";; MSG SIZE  rcvd: %s\n",  $size;
     }
-    elsif ( $error ) {
-        if ( ref $error ne 'HASH' ) {
-            printf ";; %s\n", $error;
-        }
-        elsif ( $error->{message} ) {
-            printf ";; %s: %s\n", $error->{kind}, $error->{message};
+    elsif ( $err_kind ) {
+        if ( $err_msg ) {
+            printf ";; %s: %s\n", $err_kind, $err_msg;
         }
         else {
-            printf ";; %s\n", $error->{kind};
+            printf ";; %s\n", $err_kind;
         }
+        print "\n";
     }
     else {
-        print ";; no response: \@$ns $question\n";
+        print ";; no response\n";
+        print "\n";
     }
+    printf ";; SERVER: %s#53\n",       $ns;
+    printf ";; WHEN: %s\n",            $dt->strftime( "%F %T.%3N" );
+    printf ";; Query time: %s msec\n", $duration;
 
     return;
 }

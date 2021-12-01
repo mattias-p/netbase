@@ -96,10 +96,10 @@ subtest 'Netbase::Question' => sub {
     };
 };
 
-subtest 'Netbase::Client' => sub {
+subtest 'Netbase::Net' => sub {
     subtest 'new()' => sub {
-        my $client = Netbase::Client->new();
-        isa_ok $client, ['Netbase::Client'], 'returns an instance';
+        my $net = Netbase::Net->new();
+        isa_ok $net, ['Netbase::Net'], 'returns an instance';
     };
 };
 
@@ -118,12 +118,12 @@ subtest 'Netbase::Cache' => sub {
     };
 
     subtest '{from,to}_bytes()' => sub {
-        my $client = Netbase::Client->new();
+        my $net = Netbase::Net->new();
         my $cache1 = Netbase::Cache->new();
         my $buffer1 = $cache1->to_bytes();
         my $cache2 = Netbase::Cache->from_bytes($buffer1);
         isa_ok $cache2, ['Netbase::Cache'], 'returns an instance';
-        $cache2->lookup( $client, question('paivarinta.se', 'A', "UDP"), ip( '9.9.9.9' ));
+        $cache2->lookup( $net, question('paivarinta.se', 'A', "UDP"), ip( '9.9.9.9' ));
         my $buffer2 = $cache2->to_bytes();
         isnt $buffer2, $buffer1;
         my $cache3 = Netbase::Cache->from_bytes($buffer2);

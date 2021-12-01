@@ -5,8 +5,8 @@ mod client;
 mod trust_dns_ext;
 
 use crate::client::Cache;
-use crate::client::Client;
 use crate::client::ErrorKind;
+use crate::client::Net;
 use crate::client::Proto;
 use crate::client::Question;
 use crate::trust_dns_ext::MessageExt;
@@ -69,7 +69,7 @@ pub extern "C" fn netbase_cache_to_bytes(
 #[no_mangle]
 pub extern "C" fn netbase_cache_lookup(
     cache: *mut CCache,
-    client: *const CClient,
+    net: *const CNet,
     question: *const CQuestion,
     server: *const CIpAddr,
     out_start: *mut u64,
@@ -81,18 +81,18 @@ pub extern "C" fn netbase_cache_lookup(
     let cache = unsafe { &mut *(cache as *mut Cache) };
     let server = unsafe { &*(server as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
-    let client = if client == std::ptr::null() {
+    let net = if net == std::ptr::null() {
         None
     } else {
-        let client = unsafe { &*(client as *const Client) };
+        let net = unsafe { &*(net as *const Net) };
         unsafe {
-            Rc::increment_strong_count(client);
+            Rc::increment_strong_count(net);
         }
-        let client = unsafe { Rc::from_raw(client) };
-        Some(client)
+        let net = unsafe { Rc::from_raw(net) };
+        Some(net)
     };
 
-    if let Some((start, duration, res)) = cache.lookup(client, question.clone(), *server) {
+    if let Some((start, duration, res)) = cache.lookup(net, question.clone(), *server) {
         unsafe {
             *out_start = start;
         }
@@ -141,31 +141,47 @@ pub extern "C" fn netbase_cache_for_each_request(
 
 #[allow(non_snake_case)]
 #[no_mangle]
+pub extern "C" fn netbase_cache_for_each_retry(
+    cache: *const CCache,
+    question: *const CQuestion,
+    server: *const CIpAddr,
+    callback: extern "C" fn(u64, u32, u16) -> (),
+) {
+    let cache = unsafe { &*(cache as *const Cache) };
+    let server = unsafe { &*(server as *const IpAddr) };
+    let question = unsafe { &*(question as *const Question) };
+    cache.for_each_retry(question, server, |start, duration, error| {
+        callback(start, duration, error.into());
+    });
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
 pub extern "C" fn netbase_cache_DESTROY(p: *mut CCache) {
     unsafe { drop(Box::from_raw(p as *mut Cache)) };
 }
 
-type CClient = c_void;
+type CNet = c_void;
 
 #[no_mangle]
-pub extern "C" fn netbase_client_new(_class: *const i8) -> *mut CClient {
-    let client = Rc::new(Client);
-    Rc::into_raw(client) as *mut CClient
+pub extern "C" fn netbase_net_new(_class: *const i8, retry: u16, retrans: u16) -> *mut CNet {
+    let net = Rc::new(Net { retry, retrans });
+    Rc::into_raw(net) as *mut CNet
 }
 
 #[no_mangle]
-pub extern "C" fn netbase_client_lookup(
-    client: *mut CClient,
+pub extern "C" fn netbase_net_lookup(
+    net: *mut CNet,
     question: *const CQuestion,
     server: *const CIpAddr,
     query_start: *mut u64,
     query_duration: *mut u32,
     get_buffer: extern "C" fn(usize) -> *mut u8,
 ) -> u16 {
-    let client = unsafe { &mut *(client as *mut Client) };
+    let net = unsafe { &mut *(net as *mut Net) };
     let server = unsafe { *(server as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
-    let (start, duration, res) = client.lookup(question.clone(), server);
+    let (_, start, duration, res) = net.lookup(question.clone(), server);
     unsafe {
         *query_start = start;
     };
@@ -186,9 +202,9 @@ pub extern "C" fn netbase_client_lookup(
 
 #[allow(non_snake_case)]
 #[no_mangle]
-pub extern "C" fn netbase_client_DESTROY(client: *mut CClient) {
-    let client = unsafe { Rc::from_raw(client as *mut Client) };
-    drop(client);
+pub extern "C" fn netbase_net_DESTROY(net: *mut CNet) {
+    let net = unsafe { Rc::from_raw(net as *mut Net) };
+    drop(net);
 }
 
 type CIpAddr = c_void;
