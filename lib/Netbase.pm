@@ -254,17 +254,26 @@ $ffi->attach(
     }
 );
 $ffi->attach(
-    lookup => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*' ] => 'message_t',
+    lookup => [ 'cache_t', 'opaque', 'question_t', 'ip_t', '(u64,u32,u16,u16,opaque)->void' ],
     sub {
         my ( $xsub, $cache, $client, $question, $ip ) = @_;
         my $start    = 0;
         my $duration = 0;
         my $msg_size = 0;
         my $err_kind = 0;
+        my $message  = undef;
+        my $closure = $ffi->closure(
+            sub {
+                ( $start, $duration, $msg_size, $err_kind, $message ) = @_;
+                if ( defined $message ) {
+                    $message = $ffi->cast( 'opaque' => 'message_t', $message );
+                }
+            }
+        );
         if ( defined $client ) {
             $client = $ffi->cast( 'net_t' => 'opaque', $client );
         }
-        my $message = scalar $xsub->( $cache, $client, $question, $ip, \$start, \$duration, \$msg_size, \$err_kind );
+        scalar $xsub->( $cache, $client, $question, $ip, $closure );
         if ( $err_kind ) {
             $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
         }

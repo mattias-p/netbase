@@ -73,11 +73,8 @@ pub extern "C" fn netbase_cache_lookup(
     net: *const CNet,
     question: *const CQuestion,
     server: *const CIpAddr,
-    out_start: *mut u64,
-    out_duration: *mut u32,
-    out_size: *mut u16,
-    out_kind: *mut u16,
-) -> *const CMessage {
+    handle_outcome: extern "C" fn(u64, u32, u16, u16, *mut CMessage),
+) {
     let cache = unsafe { &mut *(cache as *mut Cache) };
     let server = unsafe { &*(server as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
@@ -93,28 +90,19 @@ pub extern "C" fn netbase_cache_lookup(
     };
 
     if let Some((start, duration, res)) = cache.lookup(net, question.clone(), *server) {
-        unsafe {
-            *out_start = start;
-        }
-        unsafe {
-            *out_duration = duration;
-        }
         match res {
             Ok((message, size)) => {
-                unsafe {
-                    *out_size = size;
-                }
-                Rc::into_raw(message) as *mut CMessage
+                let kind = 0;
+                let message = Rc::into_raw(message) as *mut CMessage;
+                handle_outcome(start, duration, size, kind, message);
             }
             Err(kind) => {
-                unsafe {
-                    *out_kind = kind.into();
-                }
-                std::ptr::null_mut()
+                let size = 0;
+                let kind: u16 = kind.into();
+                let message = std::ptr::null_mut();
+                handle_outcome(start, duration, size, kind, message);
             }
         }
-    } else {
-        std::ptr::null_mut()
     }
 }
 
