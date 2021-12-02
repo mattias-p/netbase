@@ -34,8 +34,7 @@ sub main {
         exists $ALL_COMMANDS{$cmd_name}
         ? $ALL_COMMANDS{$cmd_name}
         : usage_err( "Unrecognized command" )
-      )
-      if defined $cmd_name;
+    ) if defined $cmd_name;
 
     do_help( $cmd_name )
       if $opt_help;
@@ -73,8 +72,8 @@ sub do_query {
 
     GetOptionsFromArray(
         \@args,
-        "h|help" => \$opt_help,
-        "man"    => \$opt_man,
+        "h|help"     => \$opt_help,
+        "man"        => \$opt_man,
         "n|network"  => \$opt_network,
         "r|read=s"   => \$opt_read,
         "w|write=s"  => \$opt_write,
@@ -92,7 +91,7 @@ sub do_query {
             elsif ( parse_ns( $value ) ) {
                 $opt_ns = $value;
             }
-            elsif ( ($value =~ /^\+(.*)$/) && (my $callback = $plus_opts{$1}) ) {
+            elsif ( ( $value =~ /^\+(.*)$/ ) && ( my $callback = $plus_opts{$1} ) ) {
                 $callback->();
             }
             else {
@@ -100,7 +99,7 @@ sub do_query {
             }
         },
     ) or usage_err( "Error in command line arguments", "query" );
-    $opt_proto  //= 'UDP';
+    $opt_proto //= 'UDP';
 
     do_help( "query" )
       if $opt_help;
@@ -142,7 +141,7 @@ sub do_query {
     my $cache = init_cache( $opt_read );
     my $net;
     if ( defined $opt_network ) {
-        $net = Netbase::Net->new(3, 1);
+        $net = Netbase::Net->new( 3, 1 );
     }
 
     my $question = question(
@@ -269,6 +268,7 @@ sub parse_ns {
         return;
     }
 }
+
 sub show_outcome {
     my ( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
     print "; <<>> netbase <<>> $question \@$ns\n";
@@ -278,7 +278,7 @@ sub show_outcome {
         print ";; Got answer:\n";
         print $message;
         print "\n";
-        printf ";; MSG SIZE  rcvd: %s\n",  $size;
+        printf ";; MSG SIZE  rcvd: %s\n", $size;
     }
     elsif ( $err_kind ) {
         if ( $err_msg ) {
@@ -305,7 +305,8 @@ sub do_help {
 
     if ( defined $cmd_name ) {
         pod2usage( -verbose => 99, -sections => "COMMAND netbase $cmd_name" );
-    } else {
+    }
+    else {
         pod2usage( -verbose => 99, -sections => "NAME|SYNOPSIS|OPTIONS|COMMANDS|DESCRIPTION" );
     }
 
@@ -319,7 +320,7 @@ sub usage_err {
         pod2usage( -msg => "netbase: $message", -verbose => 99, -sections => "COMMAND netbase $cmd_name/USAGE" );
     }
     else {
-        pod2usage( "netbase: $message" )
+        pod2usage( "netbase: $message" );
     }
 
     return;
