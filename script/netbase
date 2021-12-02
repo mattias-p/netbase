@@ -6,7 +6,7 @@ use Const::Fast;
 use DateTime;
 use File::Slurp qw( read_file write_file );
 use Getopt::Long qw( GetOptionsFromArray );
-use Netbase qw( ip proto name question rrtype );
+use Netbase qw( ip proto name question rrtype :proto );
 use Pod::Usage qw( pod2usage );
 
 const my %ALL_COMMANDS => (
@@ -21,7 +21,7 @@ sub main {
     my $opt_help;
     my $opt_man;
 
-    Getopt::Long::Configure qw( bundling require_order );
+    Getopt::Long::Configure qw( posix_default bundling require_order );
     GetOptionsFromArray(
         \@args,
         "h|help" => \$opt_help,
@@ -62,8 +62,14 @@ sub do_query {
     my $opt_qname;
     my $opt_qtype;
     my $opt_ns;
-    my $opt_proto;
+    my $opt_proto   = $PROTO_UDP;
     my $opt_recurse = 0;
+    my %plus_opts   = (
+        udp       => sub { $opt_proto   = $PROTO_UDP },
+        tcp       => sub { $opt_proto   = $PROTO_TCP },
+        recurse   => sub { $opt_recurse = 1 },
+        norecurse => sub { $opt_recurse = 0 },
+    );
 
     GetOptionsFromArray(
         \@args,
@@ -75,8 +81,6 @@ sub do_query {
         "u|update=s" => \$opt_update,
         "q|qname=s"  => \$opt_qname,
         "t|qtype=s"  => \$opt_qtype,
-        "p|proto=s"  => \$opt_proto,
-        "recurse"    => \$opt_recurse,
         "<>"         => sub {
             my ( $value ) = @_;
             if ( rrtype( $value ) ) {
@@ -87,6 +91,9 @@ sub do_query {
             }
             elsif ( parse_ns( $value ) ) {
                 $opt_ns = $value;
+            }
+            elsif ( ($value =~ /^\+(.*)$/) && (my $callback = $plus_opts{$1}) ) {
+                $callback->();
             }
             else {
                 usage_err( "Invalid argument: $value", "query" );
@@ -183,14 +190,13 @@ sub do_list {
     $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            print "\@$ns $question\n";
+            print "$question \@$ns\n";
         }
     );
 
     return;
 }
 
-use Data::Dumper;
 sub do_dump {
     my @args = @_;
 
@@ -265,7 +271,7 @@ sub parse_ns {
 }
 sub show_outcome {
     my ( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
-    print "; <<>> netbase <<>> \@$ns $question\n";
+    print "; <<>> netbase <<>> $question \@$ns\n";
 
     my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
     if ( $message ) {
@@ -379,15 +385,15 @@ netbase query - Perform a single lookup
 
 =head2 USAGE
 
-netbase query [options] -n [-r FILE] [-q] NAME [-t] TYPE SERVER
+netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query [options] -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER
+netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query [options] -w FILE [-q] NAME [-t] TYPE SERVER
+netbase query -w FILE [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query [options] -u FILE [-q] NAME [-t] TYPE SERVER
+netbase query -u FILE [-q] NAME [-t] TYPE SERVER [query options]
 
-=head2 MODE
+=head2 MODES
 
 =over 4
 
@@ -414,31 +420,9 @@ Must not be combined B<--update>.
 Short for B<--read FILE --write FILE>.
 Must not be combined with B<--read> nor with B<--write>.
 
-=item B<-q NAME>, B<--qname NAME>
-
-The qname to ask for in the query.
-
-=item B<-t TYPE>, B<--qtype TYPE>
-
-The qtype to ask for in the query.
-
 =back
 
-=head2 OPTIONS
-
-=over 4
-
-=item B<-p PROTO>, B<--proto PROTO>
-
-The transport protocol to use when sending the request.
-
-=item B<--recurse>
-
-Set the RD flag in the request.
-
-=back
-
-=head2 ARGUMENTS
+=head2 QUERY ARGUMENTS
 
 =over 4
 
@@ -456,6 +440,26 @@ as a TYPE.
 =item B<SERVER>
 
 The syntax for a SERVER is an at-sign (@) immediately followed by an IP address.
+
+=item B<-q NAME>, B<--qname NAME>
+
+The qname to ask for in the request.
+
+=item B<-t TYPE>, B<--qtype TYPE>
+
+The qtype to ask for in the request.
+
+=head2 QUERY OPTIONS
+
+=item B<+udp>, B<+tcp>
+
+Select transport protocol.
+Default is C<+udp>.
+
+=item B<+recurse>, B<+norecurse>
+
+Set/unset the RD flag in the request.
+Default is C<+norecurse>.
 
 =back
 

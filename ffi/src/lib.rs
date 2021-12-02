@@ -318,9 +318,13 @@ pub extern "C" fn netbase_question_to_string(this: *mut CQuestion) -> *const i8 
 
     let this = unsafe { &*(this as *mut Question) };
     let recurse = if this.recursion_desired { "" } else { "no" };
+    let proto = match this.proto {
+        Protocol::UDP => "udp",
+        Protocol::TCP => "tcp",
+    };
     let output = format!(
-        "{} {} +{} +{}recurse",
-        &this.qname, this.qtype, this.proto, recurse
+        "{} {} +{}recurse +{}",
+        &this.qname, this.qtype, recurse, proto,
     );
     let output = CString::new(output).unwrap();
     let ptr = output.as_ptr();
@@ -406,7 +410,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned()
             },
-            "example.com A +UDP +recurse"
+            "example.com A +recurse +udp"
         );
     }
 }

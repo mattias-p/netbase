@@ -45,15 +45,6 @@ impl From<Protocol> for u8 {
     }
 }
 
-impl fmt::Display for Protocol {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Protocol::TCP => write!(f, "TCP"),
-            Protocol::UDP => write!(f, "UDP"),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct Question {
     #[serde(with = "trust_dns_ext::custom_serde::binary::name")]
