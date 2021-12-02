@@ -209,7 +209,9 @@ impl Cache {
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
-                                Self::perror(query_time, &parse_err);
+                                if let Some(parse_err) = parse_err {
+                                    Self::perror(query_time, &parse_err);
+                                }
                                 Ok(message)
                             }
                             Err(lookup_err) => {

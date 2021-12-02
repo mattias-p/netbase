@@ -111,10 +111,8 @@ subtest 'Netbase::Cache' => sub {
 
     subtest 'lookup()' => sub {
         my $cache = Netbase::Cache->new();
-        my ($response, $start, $duration) = $cache->lookup( undef, question('example.com', 'A'), ip( '192.0.2.1' ) );
-        is $response, undef, "returns undef (not found)";
-        is $start, 0, "returns start time 0";
-        is $duration, 0, "returns query duration 0";
+        my $responses = $cache->lookup( undef, question('example.com', 'A'), ip( '192.0.2.1' ) );
+        is $responses, { '192.0.2.1' => [0, 0, 0, 0, undef] };
     };
 
     subtest '{from,to}_bytes()' => sub {

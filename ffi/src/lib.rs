@@ -72,11 +72,11 @@ pub extern "C" fn netbase_cache_lookup(
     cache: *mut CCache,
     net: *const CNet,
     question: *const CQuestion,
-    server: *const CIpAddr,
+    server_p: *const CIpAddr,
     handle_outcome: extern "C" fn(u64, u32, u16, u16, *mut CMessage),
 ) {
     let cache = unsafe { &mut *(cache as *mut Cache) };
-    let server = unsafe { &*(server as *const IpAddr) };
+    let server = unsafe { &*(server_p as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
     let net = if net == std::ptr::null() {
         None

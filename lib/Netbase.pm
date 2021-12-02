@@ -273,11 +273,12 @@ $ffi->attach(
         if ( defined $client ) {
             $client = $ffi->cast( 'net_t' => 'opaque', $client );
         }
-        scalar $xsub->( $cache, $client, $question, $ip, $closure );
         if ( $err_kind ) {
             $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
         }
-        return ( $message, $err_kind, $start, $duration, $msg_size );
+        $xsub->( $cache, $client, $question, $ip, $closure );
+
+        return { $ip => [ $start, $duration, $msg_size, $err_kind, $message ] };
     }
 );
 $ffi->attach(

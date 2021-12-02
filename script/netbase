@@ -212,8 +212,15 @@ sub do_query {
     }
 
     # Perform lookup
-    my @outcome = $cache->lookup( $net, $question, $ns );
-    show_all_attempts( $cache, $question, $ns, @outcome );
+    my @queries;
+    my $outcomes = $cache->lookup( $net, $question, $ns );
+    for my $outcome_ns ( keys %{ $outcomes } ) {
+        my ( $start, $duration, $msg_size, $err_kind, $message ) = @{ $outcomes->{$outcome_ns} };
+        $outcome_ns = ip( $outcome_ns );
+        push @queries, [ $question, $outcome_ns, $message, $err_kind, $start, $duration, $msg_size ];
+    }
+
+    show_all_attempts( $cache, @queries );
 
     # Save cache
     if ( defined ( my $file = $opt_create // $opt_update ) ) {
@@ -271,19 +278,16 @@ sub do_dump {
     $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            my ( $message, $err_kind, $start, $duration, $size ) = $cache->lookup( undef, $question, $ns );
-            push @queries, [ $question, $ns, $message, $err_kind, $start, $duration, $size ];
+            my $outcomes = $cache->lookup( undef, $question, $ns );
+            for my $outcome_ns ( keys %{ $outcomes } ) {
+                my ( $start, $duration, $msg_size, $err_kind, $message ) = @{ $outcomes->{$outcome_ns} };
+                $outcome_ns = ip( $outcome_ns );
+                push @queries, [ $question, $outcome_ns, $message, $err_kind, $start, $duration, $msg_size ];
+            }
         }
     );
 
-    my $first = 1;
-    for my $entry ( sort { $a->[4] <=> $b->[4] } @queries ) {
-        print "\n\n"
-          if !$first;
-        $first = 0;
-
-        show_all_attempts( $cache, @$entry );
-    }
+    show_all_attempts( $cache, @queries );
 
     return;
 }
@@ -314,29 +318,38 @@ sub parse_ns {
 }
 
 sub show_all_attempts {
-    my ( $cache, $question, $ns, $message, $err_kind, $start, $duration, $size ) = @_;
+    my ( $cache, @queries ) = @_;
 
-    my @failures;
-    $cache->for_each_retry(
-        $question,
-        $ns,
-        sub {
-            my ( $start, $duration, $err_kind ) = @_;
-            push @failures, [ $question, $ns, undef, $err_kind, $start, $duration, 0, undef ];
+    my $first = 1;
+    for my $entry ( sort { $a->[4] <=> $b->[4] } @queries ) {
+        my ( $question, $ns, $message, $err_kind, $start, $duration, $msg_size ) = @$entry;
+
+        my @failures;
+        $cache->for_each_retry(
+            $question,
+            $ns,
+            sub {
+                my ( $start, $duration, $err_kind ) = @_;
+                push @failures, [ $question, $ns, undef, $err_kind, $start, $duration, 0 ];
+            }
+        );
+
+        print "\n\n"
+          if !$first;
+        $first = 0;
+
+        for my $failure ( @failures ) {
+            show_outcome( @$failure );
+            print "\n\n"
         }
-    );
-
-    for my $failure ( @failures ) {
-        show_outcome( @$failure );
-        print "\n\n";
+        show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $msg_size );
     }
-    show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $size );
 
     return;
 }
 
 sub show_outcome {
-    my ( $question, $ns, $message, $err_kind, $start, $duration, $size ) = @_;
+    my ( $question, $ns, $message, $err_kind, $start, $duration, $msg_size ) = @_;
     print "; <<>> netbase <<>> $question \@$ns\n";
 
     my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
@@ -344,7 +357,7 @@ sub show_outcome {
         print ";; Got answer:\n";
         print $message;
         print "\n";
-        printf ";; Response size: %s bytes\n", $size;
+        printf ";; Response size: %s bytes\n", $msg_size;
     }
     elsif ( $err_kind ) {
         printf ";; %s\n\n", $err_kind;
