@@ -18,6 +18,7 @@ use trust_dns_client::rr::RecordType;
 use trust_dns_proto::error::ProtoError;
 use trust_dns_proto::error::ProtoErrorKind;
 use trust_dns_proto::xfer::DnsRequest;
+use trust_dns_proto::xfer::DnsResponse;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum Protocol {
@@ -276,59 +277,62 @@ impl Net {
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
-        use std::iter;
         use std::thread;
         use std::time::Duration;
-        use std::time::SystemTime;
-        use std::time::UNIX_EPOCH;
-        use trust_dns_proto::DnsHandle;
 
         let address = SocketAddr::new(server, 53);
         let runtime = Runtime::new().unwrap();
-        let mut queries = iter::repeat_with(|| {
-            let mut client: AsyncClient = match question.proto {
-                Protocol::UDP => Self::new_udp_client(&runtime, address),
-                Protocol::TCP => Self::new_tcp_client(&runtime, address),
-            };
-            let query = client.send(question.clone());
-            let start_time = SystemTime::now();
-            let outcome = runtime.block_on(query);
-            let end_time = SystemTime::now();
-            let query_duration = end_time
-                .duration_since(start_time)
-                .expect("Time went backwards during request")
-                .as_millis() as u32;
-            let query_time = start_time
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards before request")
-                .as_millis() as u64;
-            (outcome, query_time, query_duration)
-        });
-
-        let mut tries_left = self.retry;
-        let retrans = self.retrans;
-        let failures: Vec<_> = queries
-            .map_while(|(outcome, query_start, query_duration)| {
-                tries_left = tries_left.saturating_sub(1);
-                match outcome {
-                    Err(failure) if tries_left > 0 => {
-                        thread::sleep(Duration::from_secs(retrans as u64));
-                        Some(Failure {
-                            query_start,
-                            query_duration,
-                            kind: (&failure).into(),
-                        })
-                    }
-                    _ => None,
+        let mut client: AsyncClient = match question.proto {
+            Protocol::UDP => Self::new_udp_client(&runtime, address),
+            Protocol::TCP => Self::new_tcp_client(&runtime, address),
+        };
+        let mut failures = Vec::new();
+        let mut final_outcome = None;
+        for tries_left in (0..self.retry.max(1)).rev() {
+            let (outcome, query_start, query_duration) = Self::query(&runtime, &mut client, question.clone());
+            match outcome {
+                Err(failure) if tries_left > 0 => {
+                    failures.push(Failure {
+                        query_start,
+                        query_duration,
+                        kind: (&failure).into(),
+                    });
+                    thread::sleep(Duration::from_secs(self.retrans as u64));
                 }
-            })
-            .collect();
+                outcome => {
+                    final_outcome = Some((outcome, query_start, query_duration));
+                    break;
+                }
+            }
+        }
 
-        let (outcome, query_start, query_duration) = queries.next().unwrap();
+        let (outcome, query_start, query_duration) = final_outcome.unwrap();
         let bytes =
             outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
 
         (failures, query_start, query_duration, bytes)
+    }
+
+    fn query(runtime: &Runtime, client: &mut AsyncClient, question: Question) -> (Result<DnsResponse, ProtoError>, u64, u32) {
+        use std::time::SystemTime;
+        use std::time::UNIX_EPOCH;
+        use trust_dns_proto::DnsHandle;
+
+        let query = client.send(question);
+        let start_time = SystemTime::now();
+        let outcome = runtime.block_on(query);
+        let end_time = SystemTime::now();
+        eprintln!("start {:?}", start_time);
+        eprintln!("end   {:?}", end_time);
+        let query_duration = end_time
+            .duration_since(start_time)
+            .expect("Time went backwards during request")
+            .as_millis() as u32;
+        let query_time = start_time
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards before request")
+            .as_millis() as u64;
+        (outcome, query_time, query_duration)
     }
 
     fn new_udp_client(runtime: &Runtime, address: SocketAddr) -> AsyncClient {
