@@ -152,7 +152,7 @@ sub do_query {
         }
     );
 
-    show_outcome( $question, $ns, $cache->lookup( $net, $question, $ns ) );
+    show_all_attempts( $cache, $question, $ns, $cache->lookup( $net, $question, $ns ) );
 
     if ( $opt_write ) {
         write_file $opt_write, $cache->to_bytes();
@@ -225,24 +225,18 @@ sub do_dump {
     $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            push @queries, [ $question, $ns, $cache->lookup( undef, $question, $ns ) ];
-            $cache->for_each_retry(
-                $question,
-                $ns,
-                sub {
-                    my ( $start, $duration, $err_kind ) = @_;
-                    push @queries, [ $question, $ns, undef, $err_kind, $start, $duration, 0, undef ];
-                }
-            );
+            my ( $message, $err_kind, $start, $duration, $size, $err_msg ) = $cache->lookup( undef, $question, $ns );
+            push @queries, [ $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ];
         }
     );
+
     my $first = 1;
     for my $entry ( sort { $a->[4] <=> $b->[4] } @queries ) {
-        if ( !$first ) {
-            print "\n\n";
-        }
-        show_outcome( @$entry );
+        print "\n\n"
+          if !$first;
         $first = 0;
+
+        show_all_attempts( $cache, @$entry );
     }
 
     return;
@@ -267,6 +261,28 @@ sub parse_ns {
     else {
         return;
     }
+}
+
+sub show_all_attempts {
+    my ( $cache, $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
+
+    my @failures;
+    $cache->for_each_retry(
+        $question,
+        $ns,
+        sub {
+            my ( $start, $duration, $err_kind ) = @_;
+            push @failures, [ $question, $ns, undef, $err_kind, $start, $duration, 0, undef ];
+        }
+    );
+
+    for my $failure ( @failures ) {
+        show_outcome( @$failure );
+        print "\n\n"
+    }
+    show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg );
+
+    return;
 }
 
 sub show_outcome {
