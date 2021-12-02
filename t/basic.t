@@ -91,8 +91,8 @@ subtest 'Netbase::Question' => sub {
 
     subtest 'stringification' => sub {
         my $question = question( "example.com", "A", { proto => "UDP" } );
-        is $question->to_string(), "example.com A +norecurse +udp", 'to_string() returns correct string';
-        is "$question", "example.com A +norecurse +udp", 'q("") returns correct string';
+        is $question->to_string(), "example.com A +norecurse +noedns +udp", 'to_string() returns correct string';
+        is "$question", "example.com A +norecurse +noedns +udp", 'q("") returns correct string';
     };
 };
 

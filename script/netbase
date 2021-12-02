@@ -271,8 +271,8 @@ sub do_dump {
     $cache->for_each_request(
         sub {
             my ( $ns, $question ) = @_;
-            my ( $message, $err_kind, $start, $duration, $size, $err_msg ) = $cache->lookup( undef, $question, $ns );
-            push @queries, [ $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ];
+            my ( $message, $err_kind, $start, $duration, $size ) = $cache->lookup( undef, $question, $ns );
+            push @queries, [ $question, $ns, $message, $err_kind, $start, $duration, $size ];
         }
     );
 
@@ -314,7 +314,7 @@ sub parse_ns {
 }
 
 sub show_all_attempts {
-    my ( $cache, $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
+    my ( $cache, $question, $ns, $message, $err_kind, $start, $duration, $size ) = @_;
 
     my @failures;
     $cache->for_each_retry(
@@ -330,13 +330,13 @@ sub show_all_attempts {
         show_outcome( @$failure );
         print "\n\n";
     }
-    show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg );
+    show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $size );
 
     return;
 }
 
 sub show_outcome {
-    my ( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg ) = @_;
+    my ( $question, $ns, $message, $err_kind, $start, $duration, $size ) = @_;
     print "; <<>> netbase <<>> $question \@$ns\n";
 
     my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
@@ -347,13 +347,7 @@ sub show_outcome {
         printf ";; Response size: %s bytes\n", $size;
     }
     elsif ( $err_kind ) {
-        if ( $err_msg ) {
-            printf ";; %s: %s\n", $err_kind, $err_msg;
-        }
-        else {
-            printf ";; %s\n", $err_kind;
-        }
-        print "\n";
+        printf ";; %s\n\n", $err_kind;
     }
     else {
         print ";; NOT IN CACHE\n";

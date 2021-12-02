@@ -77,7 +77,6 @@ pub extern "C" fn netbase_cache_lookup(
     out_duration: *mut u32,
     out_size: *mut u16,
     out_kind: *mut u16,
-    get_buffer: extern "C" fn(usize) -> *mut u8,
 ) -> *const CMessage {
     let cache = unsafe { &mut *(cache as *mut Cache) };
     let server = unsafe { &*(server as *const IpAddr) };
@@ -107,14 +106,7 @@ pub extern "C" fn netbase_cache_lookup(
                 }
                 Rc::into_raw(message) as *mut CMessage
             }
-            Err((kind, details)) => {
-                if let Some(details) = details {
-                    let details = details.to_string();
-                    let bytes = get_buffer(details.len());
-                    let bytes = ptr::slice_from_raw_parts_mut(bytes, details.len());
-                    let bytes = unsafe { &mut *bytes };
-                    bytes.copy_from_slice(details.as_bytes());
-                }
+            Err(kind) => {
                 unsafe {
                     *out_kind = kind.into();
                 }

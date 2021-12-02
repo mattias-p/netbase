@@ -186,20 +186,18 @@ impl Cache {
     ) -> Option<(
         u64,
         u32,
-        Result<(Rc<Message>, u16), (ErrorKind, Option<ProtoError>)>,
+        Result<(Rc<Message>, u16), ErrorKind>,
     )> {
         match net {
             None => self
                 .cache
                 .get(&question)
                 .and_then(|inner| inner.get(&server))
-                .cloned()
-                .map(|response| (response, None)),
+                .cloned(),
             Some(ref net) => {
                 if self.is_reading.get() {
-                    return Some((0, 0, Err((ErrorKind::Lock, None))));
+                    return Some((0, 0, Err(ErrorKind::Lock)));
                 }
-                let mut details = None;
                 let response = self
                     .cache
                     .entry(question.clone())
@@ -211,13 +209,12 @@ impl Cache {
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
-                                details = parse_err.map(Into::into);
+                                Self::perror(query_time, &parse_err);
                                 Ok(message)
                             }
                             Err(lookup_err) => {
-                                let err_kind = (&lookup_err).into();
-                                details = Some(lookup_err);
-                                Err(err_kind)
+                                Self::perror(query_time, &lookup_err);
+                                Err((&lookup_err).into())
                             }
                         };
                         Rc::new(Response {
@@ -228,19 +225,19 @@ impl Cache {
                         })
                     })
                     .clone();
-                Some((response, details))
+                Some(response)
             }
         }
-        .map(|(response, details)| {
+        .map(|response| {
             (
                 response.query_time,
                 response.query_duration,
                 match &response.outcome {
                     Ok(mymessage) => match mymessage.decoded {
                         Some(ref message) => Ok((message.clone(), mymessage.encoded.len() as u16)),
-                        None => Err((ErrorKind::Protocol, details)),
+                        None => Err(ErrorKind::Protocol),
                     },
-                    Err(error_kind) => Err((error_kind.clone(), None)),
+                    Err(error_kind) => Err(error_kind.clone()),
                 },
             )
         })
@@ -282,6 +279,12 @@ impl Cache {
                 callback(failure.query_start, failure.query_duration, failure.kind)
             });
         self.is_reading.set(old_val);
+    }
+
+    fn perror<E: fmt::Debug>(query_time: u64, error: &E) {
+        use chrono::TimeZone;
+        use chrono::Utc;
+        eprintln!("{} netbase: {:?}", Utc.timestamp_millis(query_time as i64).format("%F %H:%M:%S%.3f"), error);
     }
 }
 
@@ -345,25 +348,17 @@ impl Net {
     fn query(
         runtime: &Runtime,
         client: &mut AsyncClient,
-        question: Question,
+        question: Question
     ) -> (Result<DnsResponse, ProtoError>, u64, u32) {
-        use std::time::SystemTime;
-        use std::time::UNIX_EPOCH;
+        use chrono::Utc;
         use trust_dns_proto::DnsHandle;
 
         let query = client.send(question);
-        let start_time = SystemTime::now();
+        let started = Utc::now().timestamp_millis();
         let outcome = runtime.block_on(query);
-        let end_time = SystemTime::now();
-        let query_duration = end_time
-            .duration_since(start_time)
-            .expect("Time went backwards during request")
-            .as_millis() as u32;
-        let query_time = start_time
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards before request")
-            .as_millis() as u64;
-        (outcome, query_time, query_duration)
+        let finished = Utc::now().timestamp_millis();
+        let duration = finished - started;
+        (outcome, started as u64, duration as u32)
     }
 
     fn new_udp_client(runtime: &Runtime, address: SocketAddr, timeout: Duration) -> AsyncClient {

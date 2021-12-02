@@ -254,29 +254,21 @@ $ffi->attach(
     }
 );
 $ffi->attach(
-    lookup => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*', '(usize)->opaque' ] => 'message_t',
+    lookup => [ 'cache_t', 'opaque', 'question_t', 'ip_t', 'u64*', 'u32*', 'u16*', 'u16*' ] => 'message_t',
     sub {
         my ( $xsub, $cache, $client, $question, $ip ) = @_;
         my $start    = 0;
         my $duration = 0;
         my $msg_size = 0;
         my $err_kind = 0;
-        my $err_msg  = "";
-        my $closure  = $ffi->closure(
-            sub {
-                my ( $size ) = @_;
-                grow( $err_msg, $size );
-                return scalar_to_pointer $err_msg;
-            }
-        );
         if ( defined $client ) {
             $client = $ffi->cast( 'net_t' => 'opaque', $client );
         }
-        my $message = scalar $xsub->( $cache, $client, $question, $ip, \$start, \$duration, \$msg_size, \$err_kind, $closure );
+        my $message = scalar $xsub->( $cache, $client, $question, $ip, \$start, \$duration, \$msg_size, \$err_kind );
         if ( $err_kind ) {
             $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
         }
-        return ( $message, $err_kind, $start, $duration, $msg_size, $err_msg );
+        return ( $message, $err_kind, $start, $duration, $msg_size );
     }
 );
 $ffi->attach(
