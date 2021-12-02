@@ -292,11 +292,18 @@ pub extern "C" fn netbase_question_new(
     qname: *const CName,
     qtype: u16,
     proto: u8,
+    recursion_desired: u8,
 ) -> *mut CName {
     let qname = unsafe { &*(qname as *const Name) };
     let qtype = RecordType::from(qtype);
+    let recursion_desired = recursion_desired != 0;
     if let Ok(proto) = Protocol::try_from(proto) {
-        let question = Question::new(qname.clone(), qtype, proto);
+        let question = Question {
+            qname: qname.clone(),
+            qtype,
+            proto,
+            recursion_desired,
+        };
         Box::into_raw(Box::new(question)) as *mut CName
     } else {
         std::ptr::null_mut()
@@ -304,13 +311,17 @@ pub extern "C" fn netbase_question_new(
 }
 
 #[no_mangle]
-pub extern "C" fn netbase_question_to_string(p: *mut CQuestion) -> *const i8 {
+pub extern "C" fn netbase_question_to_string(this: *mut CQuestion) -> *const i8 {
     thread_local!(
         static KEEP: RefCell<Option<CString>> = RefCell::new(None);
     );
 
-    let p = unsafe { &*(p as *mut Question) };
-    let output = format!("{} {} +{}", &p.qname, p.qtype, p.proto);
+    let this = unsafe { &*(this as *mut Question) };
+    let recurse = if this.recursion_desired { "" } else { "no" };
+    let output = format!(
+        "{} {} +{} +{}recurse",
+        &this.qname, this.qtype, this.proto, recurse
+    );
     let output = CString::new(output).unwrap();
     let ptr = output.as_ptr();
     KEEP.with(|k| {
@@ -363,11 +374,12 @@ mod tests {
 
     #[test]
     fn rust_lib_works() {
-        let question = Question::new(
-            Name::from_str("example.com").unwrap(),
-            RecordType::A,
-            Protocol::UDP,
-        );
+        let question = Question {
+            qname: Name::from_str("example.com").unwrap(),
+            qtype: RecordType::A,
+            proto: Protocol::UDP,
+            recursion_desired: false,
+        };
         assert_eq!(question.qname, "example.com".parse().unwrap());
         assert_eq!(question.qtype, RecordType::A);
         assert_eq!(question.proto, Protocol::UDP);
@@ -387,14 +399,14 @@ mod tests {
             "example.com"
         );
         let rrtype_a = 1;
-        let question = netbase_question_new(question_class.as_ptr(), name, rrtype_a, 1);
+        let question = netbase_question_new(question_class.as_ptr(), name, rrtype_a, 1, 1);
         assert_eq!(
             unsafe {
                 CStr::from_ptr(netbase_question_to_string(question))
                     .to_string_lossy()
                     .into_owned()
             },
-            "example.com A +UDP"
+            "example.com A +UDP +recurse"
         );
     }
 }

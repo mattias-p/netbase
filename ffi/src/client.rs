@@ -61,16 +61,7 @@ pub struct Question {
     #[serde(with = "trust_dns_ext::custom_serde::binary::record_type")]
     pub qtype: RecordType,
     pub proto: Protocol,
-}
-
-impl Question {
-    pub fn new(qname: Name, qtype: RecordType, proto: Protocol) -> Question {
-        Question {
-            qname,
-            qtype,
-            proto,
-        }
-    }
+    pub recursion_desired: bool,
 }
 
 impl From<Question> for DnsRequest {
@@ -92,7 +83,7 @@ impl From<Question> for DnsRequest {
             //.set_id(id)
             .set_message_type(MessageType::Query)
             .set_op_code(OpCode::Query)
-            .set_recursion_desired(true);
+            .set_recursion_desired(question.recursion_desired);
 
         DnsRequest::new(message, Default::default())
     }

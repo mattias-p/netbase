@@ -82,17 +82,17 @@ subtest 'Netbase::Question' => sub {
     };
 
     subtest 'Netbase::Util::question()' => sub {
-        my $question1 = question( name( "example.com" ), "A", "UDP" );
+        my $question1 = question( name( "example.com" ), "A", { proto => "UDP" } );
         isa_ok $question1, ['Netbase::Question'], 'returns an instance';
 
-        my $question2 = question( "example.com", "A", "UDP" );
+        my $question2 = question( "example.com", "A", { proto => "UDP" } );
         isa_ok $question2, ['Netbase::Question'], 'accepts name as string';
     };
 
     subtest 'stringification' => sub {
-        my $question = question( "example.com", "A", "UDP" );
-        is $question->to_string(), "example.com A +UDP", 'to_string() returns correct string';
-        is "$question", "example.com A +UDP", 'q("") returns correct string';
+        my $question = question( "example.com", "A", { proto => "UDP" } );
+        is $question->to_string(), "example.com A +UDP +norecurse", 'to_string() returns correct string';
+        is "$question", "example.com A +UDP +norecurse", 'q("") returns correct string';
     };
 };
 
@@ -111,7 +111,7 @@ subtest 'Netbase::Cache' => sub {
 
     subtest 'lookup()' => sub {
         my $cache = Netbase::Cache->new();
-        my ($response, $start, $duration) = $cache->lookup( undef, question('example.com', 'A', "UDP"), ip( '192.0.2.1' ) );
+        my ($response, $start, $duration) = $cache->lookup( undef, question('example.com', 'A'), ip( '192.0.2.1' ) );
         is $response, undef, "returns undef (not found)";
         is $start, 0, "returns start time 0";
         is $duration, 0, "returns query duration 0";
@@ -123,7 +123,7 @@ subtest 'Netbase::Cache' => sub {
         my $buffer1 = $cache1->to_bytes();
         my $cache2 = Netbase::Cache->from_bytes($buffer1);
         isa_ok $cache2, ['Netbase::Cache'], 'returns an instance';
-        $cache2->lookup( $net, question('paivarinta.se', 'A', "UDP"), ip( '9.9.9.9' ));
+        $cache2->lookup( $net, question('paivarinta.se', 'A'), ip( '9.9.9.9' ));
         my $buffer2 = $cache2->to_bytes();
         isnt $buffer2, $buffer1;
         my $cache3 = Netbase::Cache->from_bytes($buffer2);

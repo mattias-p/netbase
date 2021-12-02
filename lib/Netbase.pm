@@ -202,15 +202,16 @@ sub name {
 }
 
 sub question {
-    my $qname = shift;
-    my $qtype = shift;
-    my $proto = shift;
+    my ( $qname, $qtype, $opts ) = @_;
+    $opts //= {};
+    my $proto             = $opts->{proto}             // $PROTO_UDP;
+    my $recursion_desired = $opts->{recursion_desired} // 0;
 
     $qname = name( $qname )   // return;
     $qtype = rrtype( $qtype ) // return;
     $proto = proto( $proto )  // return;
 
-    return Netbase::Question->new( $qname, $qtype, $proto );
+    return Netbase::Question->new( $qname, $qtype, $proto, $recursion_desired );
 }
 
 sub rrtype {
@@ -372,8 +373,8 @@ package Netbase::Question;
 
 $ffi->mangler( sub { "netbase_question_" . shift } );
 
-$ffi->attach( new       => [ 'string', 'name_t', 'rrtype_t', 'proto_t' ] => 'question_t' );
-$ffi->attach( to_string => ['question_t']                                => 'string' );
+$ffi->attach( new       => [ 'string', 'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
+$ffi->attach( to_string => ['question_t']                                      => 'string' );
 $ffi->attach( DESTROY   => ['question_t'] );
 
 use overload '""' => \&to_string;

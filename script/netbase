@@ -63,6 +63,7 @@ sub do_query {
     my $opt_qtype;
     my $opt_ns;
     my $opt_proto;
+    my $opt_recurse = 0;
 
     GetOptionsFromArray(
         \@args,
@@ -74,7 +75,8 @@ sub do_query {
         "u|update=s" => \$opt_update,
         "q|qname=s"  => \$opt_qname,
         "t|qtype=s"  => \$opt_qtype,
-        "p|proto=s"   => \$opt_proto,
+        "p|proto=s"  => \$opt_proto,
+        "recurse"    => \$opt_recurse,
         "<>"         => sub {
             my ( $value ) = @_;
             if ( rrtype( $value ) ) {
@@ -136,7 +138,13 @@ sub do_query {
         $net = Netbase::Net->new(3, 1);
     }
 
-    my $question = question( $qname, $qtype, $proto );
+    my $question = question(
+        $qname, $qtype,
+        {
+            proto             => $proto,
+            recursion_desired => $opt_recurse,
+        }
+    );
 
     show_outcome( $question, $ns, $cache->lookup( $net, $question, $ns ) );
 
@@ -423,6 +431,10 @@ The qtype to ask for in the query.
 =item B<-p PROTO>, B<--proto PROTO>
 
 The transport protocol to use when sending the request.
+
+=item B<--recurse>
+
+Set the RD flag in the request.
 
 =back
 
