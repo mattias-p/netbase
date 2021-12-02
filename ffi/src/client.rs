@@ -308,20 +308,31 @@ impl Net {
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
-        use tokio::time;
-
         let address = SocketAddr::new(server, 53);
         let timeout = Duration::from_millis(self.timeout as u64);
+        let retrans = Duration::from_millis(self.retrans as u64);
         let runtime = Runtime::new().unwrap();
         let mut client: AsyncClient = match question.proto {
             Protocol::UDP => Self::new_udp_client(&runtime, address, timeout),
             Protocol::TCP => Self::new_tcp_client(&runtime, address, timeout),
         };
+        let _guard = runtime.enter();
+        let (failures, outcome, query_start, query_duration) = runtime.block_on(Self::query_retry(&mut client, &question, self.retry, retrans));
+
+        let bytes =
+            outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+
+        (failures, query_start, query_duration, bytes)
+    }
+
+    async fn query_retry(client: &mut AsyncClient, question: &Question, tries: u16, retrans: Duration) -> (Vec<Failure>, Result<DnsResponse, ProtoError>, u64, u32) {
+        use tokio::time;
+
         let mut failures = Vec::new();
         let mut final_outcome = None;
-        for tries_left in (0..self.retry.max(1)).rev() {
+        for tries_left in (0..tries.max(1)).rev() {
             let (outcome, query_start, query_duration) =
-                runtime.block_on(Self::query(&mut client, question.clone()));
+                Self::query(client, question.clone()).await;
             match outcome {
                 Err(failure) if tries_left > 0 => {
                     failures.push(Failure {
@@ -329,8 +340,7 @@ impl Net {
                         query_duration,
                         kind: (&failure).into(),
                     });
-                    let _guard = runtime.enter();
-                    runtime.block_on(time::sleep(Duration::from_millis(self.retrans as u64)));
+                    time::sleep(retrans).await;
                 }
                 outcome => {
                     final_outcome = Some((outcome, query_start, query_duration));
@@ -340,10 +350,7 @@ impl Net {
         }
 
         let (outcome, query_start, query_duration) = final_outcome.unwrap();
-        let bytes =
-            outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
-
-        (failures, query_start, query_duration, bytes)
+        (failures, outcome, query_start, query_duration)
     }
 
     async fn query(
