@@ -7,7 +7,7 @@ mod trust_dns_ext;
 use crate::client::Cache;
 use crate::client::ErrorKind;
 use crate::client::Net;
-use crate::client::Proto;
+use crate::client::Protocol;
 use crate::client::Question;
 use crate::trust_dns_ext::MessageExt;
 use std::borrow::Borrow;
@@ -295,7 +295,7 @@ pub extern "C" fn netbase_question_new(
 ) -> *mut CName {
     let qname = unsafe { &*(qname as *const Name) };
     let qtype = RecordType::from(qtype);
-    if let Ok(proto) = Proto::try_from(proto) {
+    if let Ok(proto) = Protocol::try_from(proto) {
         let question = Question::new(qname.clone(), qtype, proto);
         Box::into_raw(Box::new(question)) as *mut CName
     } else {
@@ -366,11 +366,11 @@ mod tests {
         let question = Question::new(
             Name::from_str("example.com").unwrap(),
             RecordType::A,
-            Proto::UDP,
+            Protocol::UDP,
         );
         assert_eq!(question.qname, "example.com".parse().unwrap());
         assert_eq!(question.qtype, RecordType::A);
-        assert_eq!(question.proto, Proto::UDP);
+        assert_eq!(question.proto, Protocol::UDP);
     }
 
     #[test]

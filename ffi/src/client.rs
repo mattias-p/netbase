@@ -7,44 +7,49 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::rc::Rc;
-use trust_dns_client::error::ClientError;
-use trust_dns_client::error::ClientErrorKind;
+use tokio::runtime::Runtime;
+use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Message;
+use trust_dns_client::op::Query;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
+use trust_dns_proto::error::ProtoError;
+use trust_dns_proto::error::ProtoErrorKind;
+use trust_dns_proto::xfer::DnsRequest;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
-pub enum Proto {
+pub enum Protocol {
     UDP,
     TCP,
 }
 
-impl TryFrom<u8> for Proto {
+impl TryFrom<u8> for Protocol {
     type Error = ();
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(Proto::UDP),
-            2 => Ok(Proto::TCP),
+            1 => Ok(Protocol::UDP),
+            2 => Ok(Protocol::TCP),
             _ => Err(()),
         }
     }
 }
 
-impl From<Proto> for u8 {
-    fn from(value: Proto) -> u8 {
+impl From<Protocol> for u8 {
+    fn from(value: Protocol) -> u8 {
         match value {
-            Proto::UDP => 1,
-            Proto::TCP => 2,
+            Protocol::UDP => 1,
+            Protocol::TCP => 2,
         }
     }
 }
 
-impl fmt::Display for Proto {
+impl fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Proto::TCP => write!(f, "TCP"),
-            Proto::UDP => write!(f, "UDP"),
+            Protocol::TCP => write!(f, "TCP"),
+            Protocol::UDP => write!(f, "UDP"),
         }
     }
 }
@@ -55,16 +60,41 @@ pub struct Question {
     pub qname: Name,
     #[serde(with = "trust_dns_ext::custom_serde::binary::record_type")]
     pub qtype: RecordType,
-    pub proto: Proto,
+    pub proto: Protocol,
 }
 
 impl Question {
-    pub fn new(qname: Name, qtype: RecordType, proto: Proto) -> Question {
+    pub fn new(qname: Name, qtype: RecordType, proto: Protocol) -> Question {
         Question {
             qname,
             qtype,
             proto,
         }
+    }
+}
+
+impl From<Question> for DnsRequest {
+    fn from(question: Question) -> DnsRequest {
+        use trust_dns_client::op::MessageType;
+        use trust_dns_client::op::OpCode;
+
+        let query = Query::query(question.qname.clone(), question.qtype);
+
+        // build the message
+        let mut message: Message = Message::new();
+
+        // TODO: This is not the final ID, it's actually set in the poll method of DNS future
+        //  should we just remove this?
+        //let id: u16 = rand::random();
+
+        message.add_query(query);
+        message
+            //.set_id(id)
+            .set_message_type(MessageType::Query)
+            .set_op_code(OpCode::Query)
+            .set_recursion_desired(true);
+
+        DnsRequest::new(message, Default::default())
     }
 }
 
@@ -77,16 +107,14 @@ pub enum ErrorKind {
     Lock,
 }
 
-impl From<&ClientError> for ErrorKind {
-    fn from(err: &ClientError) -> Self {
+impl From<&ProtoError> for ErrorKind {
+    fn from(err: &ProtoError) -> Self {
         match err.kind() {
-            ClientErrorKind::DnsSec(_)
-            | ClientErrorKind::Message(_)
-            | ClientErrorKind::Msg(_)
-            | ClientErrorKind::SendError(_) => ErrorKind::Internal,
-            ClientErrorKind::Io(_) => ErrorKind::Io,
-            ClientErrorKind::Timeout => ErrorKind::Timeout,
-            ClientErrorKind::Proto(_) => ErrorKind::Protocol,
+            ProtoErrorKind::Io(_) => ErrorKind::Io,
+            ProtoErrorKind::Timeout => ErrorKind::Timeout,
+            ProtoErrorKind::CharacterDataTooLong { .. }
+            | ProtoErrorKind::IncorrectRDataLengthRead { .. } => ErrorKind::Protocol,
+            _ => ErrorKind::Internal,
         }
     }
 }
@@ -148,7 +176,7 @@ impl Cache {
     ) -> Option<(
         u64,
         u32,
-        Result<(Rc<Message>, u16), (ErrorKind, Option<ClientError>)>,
+        Result<(Rc<Message>, u16), (ErrorKind, Option<ProtoError>)>,
     )> {
         match net {
             None => self
@@ -265,34 +293,24 @@ impl Net {
         &self,
         question: Question,
         server: IpAddr,
-    ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ClientError>) {
+    ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
         use std::iter;
-        use std::net::SocketAddr;
         use std::thread;
         use std::time::Duration;
         use std::time::SystemTime;
         use std::time::UNIX_EPOCH;
-        use trust_dns_client::client::Client;
-        use trust_dns_client::client::SyncClient;
-        use trust_dns_client::rr::DNSClass;
-        use trust_dns_client::tcp::TcpClientConnection;
-        use trust_dns_client::udp::UdpClientConnection;
+        use trust_dns_proto::DnsHandle;
 
         let address = SocketAddr::new(server, 53);
-        let mut tries_left = self.retry;
-        let retrans = self.retrans;
+        let runtime = Runtime::new().unwrap();
         let mut queries = iter::repeat_with(|| {
-            let start_time = SystemTime::now();
-            let outcome = match question.proto {
-                Proto::TCP => UdpClientConnection::new(address).and_then(|conn| {
-                    let client = SyncClient::new(conn);
-                    client.query(&question.qname, DNSClass::IN, question.qtype)
-                }),
-                Proto::UDP => TcpClientConnection::new(address).and_then(|conn| {
-                    let client = SyncClient::new(conn);
-                    client.query(&question.qname, DNSClass::IN, question.qtype)
-                }),
+            let mut client: AsyncClient = match question.proto {
+                Protocol::UDP => Self::new_udp_client(&runtime, address),
+                Protocol::TCP => Self::new_tcp_client(&runtime, address),
             };
+            let query = client.send(question.clone());
+            let start_time = SystemTime::now();
+            let outcome = runtime.block_on(query);
             let end_time = SystemTime::now();
             let query_duration = end_time
                 .duration_since(start_time)
@@ -304,6 +322,9 @@ impl Net {
                 .as_millis() as u64;
             (outcome, query_time, query_duration)
         });
+
+        let mut tries_left = self.retry;
+        let retrans = self.retrans;
         let failures: Vec<_> = queries
             .map_while(|(outcome, query_start, query_duration)| {
                 tries_left = tries_left.saturating_sub(1);
@@ -320,9 +341,48 @@ impl Net {
                 }
             })
             .collect();
+
         let (outcome, query_start, query_duration) = queries.next().unwrap();
         let bytes =
             outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+
         (failures, query_start, query_duration, bytes)
+    }
+
+    fn new_udp_client(runtime: &Runtime, address: SocketAddr) -> AsyncClient {
+        use tokio::net::UdpSocket;
+        use trust_dns_client::udp::UdpClientStream;
+
+        let stream = UdpClientStream::<UdpSocket>::new(address);
+        let client = AsyncClient::connect(stream);
+        let (client, bg) = runtime.block_on(client).expect("connection failed");
+        runtime.spawn(bg);
+        client
+    }
+
+    fn new_tcp_client(runtime: &Runtime, address: SocketAddr) -> AsyncClient {
+        use std::time::Duration;
+        use tokio::net::TcpStream;
+        use trust_dns_client::rr::dnssec::Signer;
+        use trust_dns_client::tcp::TcpClientStream;
+        use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
+        use trust_dns_proto::tcp::TcpClientConnect;
+        use trust_dns_proto::xfer::DnsMultiplexer;
+        use trust_dns_proto::xfer::DnsMultiplexerConnect;
+
+        let (tcp_client_stream, handle) =
+            TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(
+                address,
+                Duration::from_secs(5),
+            );
+        let stream: DnsMultiplexerConnect<
+            TcpClientConnect<AsyncIoTokioAsStd<TcpStream>>,
+            TcpClientStream<AsyncIoTokioAsStd<TcpStream>>,
+            Signer,
+        > = DnsMultiplexer::new(tcp_client_stream, handle, None);
+        let client = AsyncClient::connect(stream);
+        let (client, bg) = runtime.block_on(client).expect("connection failed");
+        runtime.spawn(bg);
+        client
     }
 }
