@@ -341,7 +341,7 @@ netbase --help COMMAND
 
 netbase --man
 
-netbase COMMAND [COMMAND_OPT...]
+netbase COMMAND [command_params]
 
 =head1 OPTIONS
 
@@ -379,7 +379,7 @@ Dump all requests in the cache, along with their outcomes.
 
 =head1 COMMAND netbase query
 
-=head2 SUBCOMMAND
+=head2 NAME
 
 netbase query - Perform a single lookup
 
@@ -465,6 +465,10 @@ Default is C<+norecurse>.
 
 =head1 COMMAND netbase list
 
+=head2 NAME
+
+netbase list - List all requests in the cache.
+
 =head2 USAGE
 
 netbase list FILE
@@ -480,6 +484,10 @@ Initialize the cache from the given FILE.
 =back
 
 =head1 COMMAND netbase dump
+
+=head2 NAME
+
+netbase dump - Dump all requests in the cache, along with their outcomes.
 
 =head2 USAGE
 
