@@ -308,7 +308,7 @@ impl Net {
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
-        use std::thread;
+        use tokio::time;
 
         let address = SocketAddr::new(server, 53);
         let timeout = Duration::from_millis(self.timeout as u64);
@@ -321,7 +321,7 @@ impl Net {
         let mut final_outcome = None;
         for tries_left in (0..self.retry.max(1)).rev() {
             let (outcome, query_start, query_duration) =
-                Self::query(&runtime, &mut client, question.clone());
+                runtime.block_on(Self::query(&mut client, question.clone()));
             match outcome {
                 Err(failure) if tries_left > 0 => {
                     failures.push(Failure {
@@ -329,7 +329,8 @@ impl Net {
                         query_duration,
                         kind: (&failure).into(),
                     });
-                    thread::sleep(Duration::from_millis(self.retrans as u64));
+                    let _guard = runtime.enter();
+                    runtime.block_on(time::sleep(Duration::from_millis(self.retrans as u64)));
                 }
                 outcome => {
                     final_outcome = Some((outcome, query_start, query_duration));
@@ -345,8 +346,7 @@ impl Net {
         (failures, query_start, query_duration, bytes)
     }
 
-    fn query(
-        runtime: &Runtime,
+    async fn query(
         client: &mut AsyncClient,
         question: Question
     ) -> (Result<DnsResponse, ProtoError>, u64, u32) {
@@ -355,7 +355,7 @@ impl Net {
 
         let query = client.send(question);
         let started = Utc::now().timestamp_millis();
-        let outcome = runtime.block_on(query);
+        let outcome = query.await;
         let finished = Utc::now().timestamp_millis();
         let duration = finished - started;
         (outcome, started as u64, duration as u32)
