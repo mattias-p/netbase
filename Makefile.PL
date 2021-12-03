@@ -24,6 +24,9 @@ WriteMakefile(
         TEST_REQUIRES => {
             'Test2::V0' => '0',
         },
+        EXE_FILES => [
+            'script/netbase',
+        ],
     )
 );
 

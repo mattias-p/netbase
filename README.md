@@ -39,15 +39,17 @@
   parallel. The only part missing is thte FFI jump.)
 
 
-## Compile
+## Install
 
 ```sh
 perl Makefile.PL
-make all
+make install
 ```
 
 ## Run
 
 ```sh
-perl -Ilib script/netbase --help
+netbase --help
+netbase --help query
+netbase --man
 ```
