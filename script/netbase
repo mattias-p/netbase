@@ -496,7 +496,11 @@ The qtype to ask for in the request.
 
 The syntax for a SERVER is an at-sign (@) immediately followed by an IP address.
 
+=back
+
 =head2 QUERY OPTIONS
+
+=over 4
 
 =item B<+udp>, B<+tcp>
 
