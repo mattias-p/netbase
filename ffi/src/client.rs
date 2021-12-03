@@ -48,6 +48,14 @@ impl From<Protocol> for u8 {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+pub struct EdnsConfig {
+    pub version: u8,
+    pub dnssec_ok: bool,
+    pub option_code: u16,
+    //pub set_z_flag: bool, TODO: implement this
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct Question {
     #[serde(with = "trust_dns_ext::custom_serde::binary::name")]
     pub qname: Name,
@@ -55,12 +63,15 @@ pub struct Question {
     pub qtype: RecordType,
     pub proto: Protocol,
     pub recursion_desired: bool,
+    pub edns_config: Option<EdnsConfig>,
 }
 
 impl From<Question> for DnsRequest {
     fn from(question: Question) -> DnsRequest {
         use trust_dns_client::op::MessageType;
         use trust_dns_client::op::OpCode;
+        use trust_dns_client::rr::rdata::opt::EdnsOption;
+        use trust_dns_proto::xfer::DnsRequestOptions;
 
         let query = Query::query(question.qname.clone(), question.qtype);
 
@@ -78,7 +89,21 @@ impl From<Question> for DnsRequest {
             .set_op_code(OpCode::Query)
             .set_recursion_desired(question.recursion_desired);
 
-        DnsRequest::new(message, Default::default())
+        let mut request_options = DnsRequestOptions::default();
+        // Extended dns
+        if let Some(edns_config) = question.edns_config {
+            request_options.use_edns = true;
+            let edns = message.edns_mut();
+            edns.set_max_payload(512);
+            edns.set_version(edns_config.version);
+            edns.set_dnssec_ok(edns_config.dnssec_ok);
+            if edns_config.option_code != 0 {
+                edns.options_mut()
+                    .insert(EdnsOption::Unknown(edns_config.option_code, vec![]));
+            }
+        }
+
+        DnsRequest::new(message, request_options)
     }
 }
 
@@ -291,7 +316,8 @@ impl Net {
         let mut failures = Vec::new();
         let mut final_outcome = None;
         for tries_left in (0..self.retry.max(1)).rev() {
-            let (outcome, query_start, query_duration) = Self::query(&runtime, &mut client, question.clone());
+            let (outcome, query_start, query_duration) =
+                Self::query(&runtime, &mut client, question.clone());
             match outcome {
                 Err(failure) if tries_left > 0 => {
                     failures.push(Failure {
@@ -315,7 +341,11 @@ impl Net {
         (failures, query_start, query_duration, bytes)
     }
 
-    fn query(runtime: &Runtime, client: &mut AsyncClient, question: Question) -> (Result<DnsResponse, ProtoError>, u64, u32) {
+    fn query(
+        runtime: &Runtime,
+        client: &mut AsyncClient,
+        question: Question,
+    ) -> (Result<DnsResponse, ProtoError>, u64, u32) {
         use std::time::SystemTime;
         use std::time::UNIX_EPOCH;
         use trust_dns_proto::DnsHandle;

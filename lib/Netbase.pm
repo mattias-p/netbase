@@ -319,7 +319,9 @@ use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
 
 $ffi->mangler( sub { "netbase_net_" . shift } );
 
-$ffi->attach( new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t', sub {
+$ffi->attach(
+    new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t',
+    sub {
         my ( $xsub, $class, %args ) = @_;
         my $timeout = delete $args{timeout} // 30;
         my $retry   = delete $args{retry}   // 3;
@@ -330,7 +332,8 @@ $ffi->attach( new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t', sub {
         $timeout = int( $timeout * 1000 );
         $retrans = int( $retrans * 1000 );
         return $xsub->( $class, $timeout, $retry, $retrans );
-});
+    }
+);
 $ffi->attach(
     lookup => [ 'net_t', 'question_t', 'ip_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
     sub {
@@ -385,8 +388,9 @@ package Netbase::Question;
 
 $ffi->mangler( sub { "netbase_question_" . shift } );
 
-$ffi->attach( new       => [ 'string', 'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
-$ffi->attach( to_string => ['question_t']                                      => 'string' );
+$ffi->attach( new       => [ 'string',     'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
+$ffi->attach( set_edns  => [ 'question_t', 'u8',     'u8',       'u16' ] );
+$ffi->attach( to_string => ['question_t'] => 'string' );
 $ffi->attach( DESTROY   => ['question_t'] );
 
 use overload '""' => \&to_string;

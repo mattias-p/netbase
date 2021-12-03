@@ -5,6 +5,7 @@ mod client;
 mod trust_dns_ext;
 
 use crate::client::Cache;
+use crate::client::EdnsConfig;
 use crate::client::ErrorKind;
 use crate::client::Net;
 use crate::client::Protocol;
@@ -164,8 +165,17 @@ pub extern "C" fn netbase_cache_DESTROY(p: *mut CCache) {
 type CNet = c_void;
 
 #[no_mangle]
-pub extern "C" fn netbase_net_new(_class: *const i8, timeout: u32, retry: u16, retrans: u32) -> *mut CNet {
-    let net = Rc::new(Net { timeout, retry, retrans });
+pub extern "C" fn netbase_net_new(
+    _class: *const i8,
+    timeout: u32,
+    retry: u16,
+    retrans: u32,
+) -> *mut CNet {
+    let net = Rc::new(Net {
+        timeout,
+        retry,
+        retrans,
+    });
     Rc::into_raw(net) as *mut CNet
 }
 
@@ -303,11 +313,28 @@ pub extern "C" fn netbase_question_new(
             qtype,
             proto,
             recursion_desired,
+            edns_config: None,
         };
         Box::into_raw(Box::new(question)) as *mut CName
     } else {
         std::ptr::null_mut()
     }
+}
+
+#[no_mangle]
+pub extern "C" fn netbase_question_set_edns(
+    this: *mut CQuestion,
+    version: u8,
+    dnssec_ok: u8,
+    option_code: u16,
+) {
+    let this = unsafe { &mut *(this as *mut Question) };
+    let dnssec_ok = dnssec_ok != 0;
+    this.edns_config = Some(EdnsConfig {
+        version,
+        dnssec_ok,
+        option_code,
+    });
 }
 
 #[no_mangle]
@@ -322,10 +349,32 @@ pub extern "C" fn netbase_question_to_string(this: *mut CQuestion) -> *const i8 
         Protocol::UDP => "udp",
         Protocol::TCP => "tcp",
     };
-    let output = format!(
-        "{} {} +{}recurse +{}",
-        &this.qname, this.qtype, recurse, proto,
-    );
+
+    let output = if let Some(edns_config) = &this.edns_config {
+        let dnssec = if edns_config.dnssec_ok { "" } else { "no" };
+        let (ednsopt, ednsopt_code) = if edns_config.option_code != 0 {
+            ("", format!("={}", edns_config.option_code))
+        } else {
+            ("no", "".to_string())
+        };
+        format!(
+            "{} {} +{}recurse +edns={} +{}dnssec +{}ednsopt{} +{}",
+            &this.qname,
+            this.qtype,
+            recurse,
+            edns_config.version,
+            dnssec,
+            ednsopt,
+            ednsopt_code,
+            proto,
+        )
+    } else {
+        format!(
+            "{} {} +{}recurse +noedns +{}",
+            &this.qname, this.qtype, recurse, proto,
+        )
+    };
+
     let output = CString::new(output).unwrap();
     let ptr = output.as_ptr();
     KEEP.with(|k| {
@@ -383,6 +432,7 @@ mod tests {
             qtype: RecordType::A,
             proto: Protocol::UDP,
             recursion_desired: false,
+            edns_config: None,
         };
         assert_eq!(question.qname, "example.com".parse().unwrap());
         assert_eq!(question.qtype, RecordType::A);
@@ -410,7 +460,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned()
             },
-            "example.com A +recurse +udp"
+            "example.com A +recurse +noedns +udp"
         );
     }
 }

@@ -66,11 +66,21 @@ sub do_query {
     my $opt_retrans = 1;
     my $opt_proto   = $PROTO_UDP;
     my $opt_recurse = 0;
-    my %plus_opts   = (
-        udp       => sub { $opt_proto   = $PROTO_UDP },
-        tcp       => sub { $opt_proto   = $PROTO_TCP },
-        recurse   => sub { $opt_recurse = 1 },
-        norecurse => sub { $opt_recurse = 0 },
+    my $opt_dnssec;
+    my $opt_edns_version;
+    my $opt_edns_opt;
+    my %plus_opts = (
+        udp           => sub { $opt_proto        = $PROTO_UDP },
+        tcp           => sub { $opt_proto        = $PROTO_TCP },
+        recurse       => sub { $opt_recurse      = 1 },
+        norecurse     => sub { $opt_recurse      = 0 },
+        noedns        => sub { $opt_edns_version = undef },
+        'edns=0'      => sub { $opt_edns_version = 0 },
+        'edns=1'      => sub { $opt_edns_version = 1 },
+        'ednsopt=137' => sub { $opt_edns_opt     = 137 },
+        noednsopt     => sub { $opt_edns_opt     = undef },
+        dnssec        => sub { $opt_dnssec       = 1 },
+        nodnssec      => sub { $opt_dnssec       = 0 },
     );
 
     GetOptionsFromArray(
@@ -105,7 +115,6 @@ sub do_query {
             }
         },
     ) or usage_err( "Error in command line arguments", "query" );
-    $opt_proto //= 'UDP';
 
     do_help( "query" )
       if $opt_help;
@@ -148,6 +157,11 @@ sub do_query {
     usage_err( "Value out of range for --retrans", "query" )
       if $opt_retrans < 0 || $opt_retrans > 1000;
 
+    if ( $opt_edns_version || $opt_dnssec || $opt_edns_opt ) {
+        $opt_edns_version //= 0;
+        $opt_dnssec       //= 0;
+    }
+
     my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
     my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
     my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
@@ -170,6 +184,9 @@ sub do_query {
             recursion_desired => $opt_recurse,
         }
     );
+    if ( defined $opt_edns_version ) {
+        $question->set_edns( $opt_edns_version, $opt_dnssec, $opt_edns_opt );
+    }
 
     show_all_attempts( $cache, $question, $ns, $cache->lookup( $net, $question, $ns ) );
 
@@ -297,7 +314,7 @@ sub show_all_attempts {
 
     for my $failure ( @failures ) {
         show_outcome( @$failure );
-        print "\n\n"
+        print "\n\n";
     }
     show_outcome( $question, $ns, $message, $err_kind, $start, $duration, $size, $err_msg );
 
@@ -517,8 +534,25 @@ Default is C<+udp>.
 
 =item B<+recurse>, B<+norecurse>
 
-Set/unset the RD flag in the request.
+Enable/disable the RD flag in the request.
 Default is C<+norecurse>.
+
+=item B<+edns=0>, B<+edns=1>, B<+noedns>
+
+Enable/disable EDNS and set its version in the request.
+Default is C<+noedns> if all other EDNS options are disabled.
+Default is C<+edns=0> if at least one EDNS option is enabled.
+
+=item B<+dnssec>, B<+nodnssec>
+
+Enable/disable the DO flag in the EDNS header of the request.
+Default is C<+noednssec>.
+
+=item B<+ednsopt=137>, B<+noednsopt>
+
+Enable/disable the adding of the given option code to the EDNS header of the
+request.
+Default is C<+noednsopt>.
 
 =back
 
