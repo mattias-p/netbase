@@ -47,11 +47,18 @@ Either it gives an error response indicating that the request is not in the
 cache, or it transparently sends a network request and records the response in
 the cache before returning it.
 
+## Dependencies
+
+To build netbase you need the following:
+* FFI::Build::MM
+* FFI::Build::File::Rust
+* rustc >= 1.56.0
+
 ## Install
 
 ```sh
 perl Makefile.PL
-make install
+sudo make install
 ```
 
 ## Run
