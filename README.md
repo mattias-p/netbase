@@ -36,6 +36,17 @@ actual request can be generated.
 Two requests that differ only in what protocol they are sent over are given
 distinct representations.
 
+## Cache miss strategies
+
+When a request is made that has a cached response, that response is returned and
+no network request.
+
+When there is no cached response Netbase has two strategies for you to choose
+from.
+Either it gives an error response indicating that the request is not in the
+cache, or it transparently sends a network request and records the response in
+the cache before returning it.
+
 ## Install
 
 ```sh

@@ -312,7 +312,7 @@ sub show_outcome {
         print ";; Got answer:\n";
         print $message;
         print "\n";
-        printf ";; MSG SIZE  rcvd: %s\n", $size;
+        printf ";; Response size: %s bytes\n", $size;
     }
     elsif ( $err_kind ) {
         if ( $err_msg ) {
@@ -324,12 +324,14 @@ sub show_outcome {
         print "\n";
     }
     else {
-        print ";; no response\n";
-        print "\n";
+        print ";; NOT IN CACHE\n";
+
+        return;
     }
-    printf ";; SERVER: %s#53\n",       $ns;
-    printf ";; WHEN: %s\n",            $dt->strftime( "%F %T.%3N" );
-    printf ";; Query time: %s msec\n", $duration;
+
+    printf ";; Name server: %s#53\n",          $ns;
+    printf ";; Request sent: %s\n",         $dt->strftime( "%F %T.%3N" );
+    printf ";; Response time: %s msec\n", $duration;
 
     return;
 }
