@@ -21,13 +21,17 @@ sub main {
     my $opt_help;
     my $opt_man;
 
-    Getopt::Long::Configure qw( posix_default bundling require_order );
+    Getopt::Long::Configure qw(
+      posix_default
+      permute
+      bundling
+      pass_through
+    );
     GetOptionsFromArray(
         \@args,
         "h|help" => \$opt_help,
         "man"    => \$opt_man,
     ) or pod2usage( -verbose => 0 );
-    Getopt::Long::Configure qw( no_require_order );
 
     my $cmd_name = shift @args;
     my $cmd_sub  = (
@@ -41,7 +45,7 @@ sub main {
     pod2usage( -verbose => 2 )
       if $opt_man;
 
-    usage_err( "No command specified" )
+    usage_err( "No command given" )
       if !defined $cmd_sub;
 
     $cmd_sub->( @args );
@@ -52,83 +56,25 @@ sub main {
 sub do_query {
     my @args = @_;
 
-    my $opt_help;
-    my $opt_man;
+    # Parse mode and config options
     my $opt_read;
     my $opt_write;
     my $opt_update;
     my $opt_network;
-    my $opt_qname;
-    my $opt_qtype;
-    my $opt_ns;
     my $opt_timeout = 5;
     my $opt_retry   = 3;
     my $opt_retrans = 1;
-    my $opt_proto   = $PROTO_UDP;
-    my $opt_recurse = 0;
-    my $opt_dnssec;
-    my $opt_edns_version;
-    my $opt_edns_opt;
-    my %plus_opts = (
-        udp           => sub { $opt_proto        = $PROTO_UDP },
-        tcp           => sub { $opt_proto        = $PROTO_TCP },
-        recurse       => sub { $opt_recurse      = 1 },
-        norecurse     => sub { $opt_recurse      = 0 },
-        noedns        => sub { $opt_edns_version = undef },
-        'edns=0'      => sub { $opt_edns_version = 0 },
-        'edns=1'      => sub { $opt_edns_version = 1 },
-        'ednsopt=137' => sub { $opt_edns_opt     = 137 },
-        noednsopt     => sub { $opt_edns_opt     = undef },
-        dnssec        => sub { $opt_dnssec       = 1 },
-        nodnssec      => sub { $opt_dnssec       = 0 },
-    );
-
+    Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-        "h|help"     => \$opt_help,
-        "man"        => \$opt_man,
         "n|network"  => \$opt_network,
         "r|read=s"   => \$opt_read,
         "w|write=s"  => \$opt_write,
         "u|update=s" => \$opt_update,
-        "q|qname=s"  => \$opt_qname,
-        "t|qtype=s"  => \$opt_qtype,
         "timeout=f"  => \$opt_timeout,
         "retry=i"    => \$opt_retry,
         "retrans=f"  => \$opt_retrans,
-        "<>"         => sub {
-            my ( $value ) = @_;
-            if ( rrtype( $value ) ) {
-                $opt_qtype = $value;
-            }
-            elsif ( name( $value ) ) {
-                $opt_qname = $value;
-            }
-            elsif ( parse_ns( $value ) ) {
-                $opt_ns = $value;
-            }
-            elsif ( ( $value =~ /^\+(.*)$/ ) && ( my $callback = $plus_opts{$1} ) ) {
-                $callback->();
-            }
-            else {
-                usage_err( "Invalid argument: $value", "query" );
-            }
-        },
     ) or usage_err( "Error in command line arguments", "query" );
-
-    do_help( "query" )
-      if $opt_help;
-    pod2usage( -verbose => 2 )
-      if $opt_man;
-
-    usage_err( "No qname specified", "query" )
-      if !defined $opt_qname;
-
-    usage_err( "No qtype specified", "query" )
-      if !defined $opt_qtype;
-
-    usage_err( "No server specified", "query" )
-      if !defined $opt_ns;
 
     if ( defined $opt_update ) {
         usage_err( "Must not specify both --update and --read", "query" )
@@ -157,17 +103,77 @@ sub do_query {
     usage_err( "Value out of range for --retrans", "query" )
       if $opt_retrans < 0 || $opt_retrans > 1000;
 
+    # Parse request options
+    my $opt_proto   = $PROTO_UDP;
+    my $opt_recurse = 0;
+    my $opt_dnssec;
+    my $opt_edns_version;
+    my $opt_edns_opt;
+    Getopt::Long::Configure qw(
+      prefix=+
+      no_bundling
+    );
+    GetOptionsFromArray(
+        \@args,
+        'udp+'       => sub { $opt_proto = $PROTO_UDP },
+        'tcp+'       => sub { $opt_proto = $PROTO_TCP },
+        'recurse!'   => \$opt_recurse,
+        'noedns+'    => sub { $opt_edns_version = undef },
+        'edns=i'     => \$opt_edns_version,
+        'ednsopt=i'  => \$opt_edns_opt,
+        'noednsopt+' => sub { $opt_edns_opt = undef },
+        'dnssec!'    => \$opt_dnssec,
+    ) or usage_err( "Error in command line arguments", "query" );
+
     if ( $opt_edns_version || $opt_dnssec || $opt_edns_opt ) {
         $opt_edns_version //= 0;
         $opt_dnssec       //= 0;
     }
 
-    my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
-    my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
-    my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
-    my $proto = proto( $opt_proto )  // usage_err( "invalid proto given",               "query" );
+    if ( defined $opt_edns_version ) {
+        usage_err( "EDNS version out of range", "query" )
+          if $opt_edns_version < 0 || $opt_edns_version > 255;
 
+        usage_err( "EDNS option code out of range", "query" )
+          if defined $opt_edns_opt && ( $opt_edns_opt < 1 || $opt_edns_opt > 65535 );
+    }
+    my $edns_opt = $opt_edns_opt // 0;
+
+    # Parse qname, qtype and server
+    my @nss = grep { $_ =~ /^@/ } @args;
+    @args = grep { $_ !~ /^@/ } @args;
+
+    my $qname = name(
+        shift @args // usage_err( "No qname given", "query" )    #
+    ) // usage_err( "Invalid qname given", "query" );
+
+    my $qtype = name(
+        shift @args // usage_err( "No qtype given", "query" )    #
+    ) // usage_err( "Invalid qtype given", "query" );
+
+    my $ns = parse_ns(
+        pop @nss // usage_err( "No server given", "query" )    #
+    ) // usage_err( "Invalid name server address given", "query" );
+
+    usage_err( "Extra arguments given", "query" )
+      if @args || @nss;
+
+    # Construct question
+    my $question = question(
+        $qname, $qtype,
+        {
+            proto             => $opt_proto,
+            recursion_desired => $opt_recurse,
+        }
+    );
+    if ( defined $opt_edns_version ) {
+        $question->set_edns( $opt_edns_version, $opt_dnssec, $edns_opt );
+    }
+
+    # Initialize cache
     my $cache = init_cache( $opt_read );
+
+    # Initialize networking
     my $net;
     if ( defined $opt_network ) {
         $net = Netbase::Net->new(
@@ -177,19 +183,11 @@ sub do_query {
         );
     }
 
-    my $question = question(
-        $qname, $qtype,
-        {
-            proto             => $proto,
-            recursion_desired => $opt_recurse,
-        }
-    );
-    if ( defined $opt_edns_version ) {
-        $question->set_edns( $opt_edns_version, $opt_dnssec, $opt_edns_opt );
-    }
+    # Perform lookup
+    my @outcome = $cache->lookup( $net, $question, $ns );
+    show_all_attempts( $cache, $question, $ns, @outcome );
 
-    show_all_attempts( $cache, $question, $ns, $cache->lookup( $net, $question, $ns ) );
-
+    # Save cache
     if ( $opt_write ) {
         write_file $opt_write, $cache->to_bytes();
     }
@@ -200,24 +198,16 @@ sub do_query {
 sub do_list {
     my @args = @_;
 
-    my $opt_help;
-    my $opt_man;
+    Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-        "h|help" => \$opt_help,
-        "man"    => \$opt_man,
     ) or usage_err( "Error in command line arguments", "list" );
 
-    do_help( "list" )
-      if $opt_help;
-    pod2usage( -verbose => 2 )
-      if $opt_man;
-
     my $arg_file = shift( @args )    #
-      // usage_err( "No cache file specified", "list" );
+      // usage_err( "No cache file given", "list" );
 
     if ( @args ) {
-        usage_err( "Extra arguments specified", "dump" );
+        usage_err( "Extra arguments given", "dump" );
     }
 
     my $cache = init_cache( $arg_file );
@@ -235,24 +225,16 @@ sub do_list {
 sub do_dump {
     my @args = @_;
 
-    my $opt_help;
-    my $opt_man;
+    Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-        "h|help" => \$opt_help,
-        "man"    => \$opt_man,
     ) or usage_err( "Error in command line arguments", "dump" );
 
-    do_help( "dump" )
-      if $opt_help;
-    pod2usage( -verbose => 2 )
-      if $opt_man;
-
     my $arg_file = shift( @args )    #
-      // usage_err( "No cache file specified", "dump" );
+      // usage_err( "No cache file given", "dump" );
 
     if ( @args ) {
-        usage_err( "Extra arguments specified", "dump" );
+        usage_err( "Extra arguments given", "dump" );
     }
 
     my $cache = init_cache( $arg_file );
@@ -438,13 +420,13 @@ netbase query - Perform a single lookup
 
 =head2 USAGE
 
-netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER [query options]
+netbase query -n [-r FILE] NAME TYPE SERVER [query options]
 
-netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER [query options]
+netbase query -r FILE [-w FILE] NAME TYPE SERVER [query options]
 
-netbase query -w FILE [-q] NAME [-t] TYPE SERVER [query options]
+netbase query -w FILE NAME TYPE SERVER [query options]
 
-netbase query -u FILE [-q] NAME [-t] TYPE SERVER [query options]
+netbase query -u FILE NAME TYPE SERVER [query options]
 
 =head2 MODES
 
@@ -502,28 +484,17 @@ Default is 1.
 
 =over 4
 
-=item B<TYPE>
-
-Short for B<--qtype TYPE>.
-
 =item B<NAME>
 
-Short for B<--qname NAME>.
+The qname to ask for in the request.
 
-B<Note>: When using this syntax NAME must not be a valid TYPE or it will be interpreted
-as a TYPE.
+=item B<TYPE>
+
+The qtype to ask for in the request.
 
 =item B<SERVER>
 
 The syntax for a SERVER is an at-sign (@) immediately followed by an IP address.
-
-=item B<-q NAME>, B<--qname NAME>
-
-The qname to ask for in the request.
-
-=item B<-t TYPE>, B<--qtype TYPE>
-
-The qtype to ask for in the request.
 
 =head2 QUERY OPTIONS
 
@@ -537,18 +508,18 @@ Default is C<+udp>.
 Enable/disable the RD flag in the request.
 Default is C<+norecurse>.
 
-=item B<+edns=0>, B<+edns=1>, B<+noedns>
+=item B<+edns VERSION>, B<+noedns>
 
 Enable/disable EDNS and set its version in the request.
 Default is C<+noedns> if all other EDNS options are disabled.
-Default is C<+edns=0> if at least one EDNS option is enabled.
+Default is C<+edns 0> if at least one EDNS option is enabled.
 
 =item B<+dnssec>, B<+nodnssec>
 
 Enable/disable the DO flag in the EDNS header of the request.
 Default is C<+noednssec>.
 
-=item B<+ednsopt=137>, B<+noednsopt>
+=item B<+ednsopt=CODE>, B<+noednsopt>
 
 Enable/disable the adding of the given option code to the EDNS header of the
 request.

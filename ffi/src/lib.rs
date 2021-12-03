@@ -353,12 +353,12 @@ pub extern "C" fn netbase_question_to_string(this: *mut CQuestion) -> *const i8 
     let output = if let Some(edns_config) = &this.edns_config {
         let dnssec = if edns_config.dnssec_ok { "" } else { "no" };
         let (ednsopt, ednsopt_code) = if edns_config.option_code != 0 {
-            ("", format!("={}", edns_config.option_code))
+            ("", format!(" {}", edns_config.option_code))
         } else {
             ("no", "".to_string())
         };
         format!(
-            "{} {} +{}recurse +edns={} +{}dnssec +{}ednsopt{} +{}",
+            "{} {} +{}recurse +edns {} +{}dnssec +{}ednsopt{} +{}",
             &this.qname,
             this.qtype,
             recurse,
