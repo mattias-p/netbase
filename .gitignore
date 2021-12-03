@@ -1,7 +1,16 @@
-/Makefile
-/ffi/_build
+# Makemaker generated files
+/MANIFEST
+/MANIFEST\.bak
 /MYMETA.*
+/Makefile
 /blib/
 /fbx.json
 /pm_to_blib
+
+# Rust generated files
+/ffi/Cargo.lock
+/ffi/_build/
+/ffi/target/
+
+# Editor files
 .*.swp
