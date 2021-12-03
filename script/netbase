@@ -61,6 +61,9 @@ sub do_query {
     my $opt_qname;
     my $opt_qtype;
     my $opt_ns;
+    my $opt_timeout = 5;
+    my $opt_retry   = 3;
+    my $opt_retrans = 1;
     my $opt_proto   = $PROTO_UDP;
     my $opt_recurse = 0;
     my %plus_opts   = (
@@ -80,6 +83,9 @@ sub do_query {
         "u|update=s" => \$opt_update,
         "q|qname=s"  => \$opt_qname,
         "t|qtype=s"  => \$opt_qtype,
+        "timeout=f"  => \$opt_timeout,
+        "retry=i"    => \$opt_retry,
+        "retrans=f"  => \$opt_retrans,
         "<>"         => sub {
             my ( $value ) = @_;
             if ( rrtype( $value ) ) {
@@ -133,6 +139,15 @@ sub do_query {
     usage_err( "Must specify at least one of --network, --read, --write or --update", "query" )
       if !defined $opt_network && !defined $opt_read;
 
+    usage_err( "Value out of range for --timeout", "query" )
+      if $opt_timeout < 0 || $opt_timeout > 1000;
+
+    usage_err( "Value out of range for --retry", "query" )
+      if $opt_retry < 1 || $opt_retry > 1000;
+
+    usage_err( "Value out of range for --retrans", "query" )
+      if $opt_retrans < 0 || $opt_retrans > 1000;
+
     my $qname = name( $opt_qname )   // usage_err( "Invalid qname given",               "query" );
     my $qtype = rrtype( $opt_qtype ) // usage_err( "Invalid qtype given",               "query" );
     my $ns    = parse_ns( $opt_ns )  // usage_err( "Invalid name server address given", "query" );
@@ -141,7 +156,11 @@ sub do_query {
     my $cache = init_cache( $opt_read );
     my $net;
     if ( defined $opt_network ) {
-        $net = Netbase::Net->new( 3, 1 );
+        $net = Netbase::Net->new(
+            timeout => $opt_timeout,
+            retry   => $opt_retry,
+            retrans => $opt_retrans,
+        );
     }
 
     my $question = question(
@@ -436,6 +455,29 @@ Must not be combined B<--update>.
 
 Short for B<--read FILE --write FILE>.
 Must not be combined with B<--read> nor with B<--write>.
+
+=back
+
+=head2 CONFIG ARGUMENTS
+
+=over 4
+
+=item B<--timeout DURATION>
+
+Seconds to wait for a response without giving up.
+A floating point number with millisecond precision.
+Default is 5.
+
+=item B<--retry COUNT>
+
+Number of times to try a query before giving up.
+Default is 3.
+
+=item B<--retrans DURATION>
+
+Seconds of extra delay before retrying a request.
+A floating point number with millisecond precision.
+Default is 1.
 
 =back
 

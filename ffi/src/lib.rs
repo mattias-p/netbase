@@ -164,8 +164,8 @@ pub extern "C" fn netbase_cache_DESTROY(p: *mut CCache) {
 type CNet = c_void;
 
 #[no_mangle]
-pub extern "C" fn netbase_net_new(_class: *const i8, retry: u16, retrans: u16) -> *mut CNet {
-    let net = Rc::new(Net { retry, retrans });
+pub extern "C" fn netbase_net_new(_class: *const i8, timeout: u32, retry: u16, retrans: u32) -> *mut CNet {
+    let net = Rc::new(Net { timeout, retry, retrans });
     Rc::into_raw(net) as *mut CNet
 }
 

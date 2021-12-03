@@ -314,11 +314,23 @@ $ffi->attach( DESTROY => ['cache_t'] );
 
 package Netbase::Net;
 
+use Carp qw( croak );
 use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
 
 $ffi->mangler( sub { "netbase_net_" . shift } );
 
-$ffi->attach( new => [ 'string', 'u16', 'u16' ] => 'net_t' );
+$ffi->attach( new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t', sub {
+        my ( $xsub, $class, %args ) = @_;
+        my $timeout = delete $args{timeout} // 30;
+        my $retry   = delete $args{retry}   // 3;
+        my $retrans = delete $args{retrans} // 1;
+        if ( %args ) {
+            croak "unrecognized arguments: " . join( ' ', sort keys %args );
+        }
+        $timeout = int( $timeout * 1000 );
+        $retrans = int( $retrans * 1000 );
+        return $xsub->( $class, $timeout, $retry, $retrans );
+});
 $ffi->attach(
     lookup => [ 'net_t', 'question_t', 'ip_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
     sub {

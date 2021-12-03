@@ -9,6 +9,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Message;
@@ -267,8 +268,9 @@ pub struct Failure {
 
 #[derive(Debug)]
 pub struct Net {
+    pub timeout: u32,
     pub retry: u16,
-    pub retrans: u16,
+    pub retrans: u32,
 }
 
 impl Net {
@@ -278,13 +280,13 @@ impl Net {
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
         use std::thread;
-        use std::time::Duration;
 
         let address = SocketAddr::new(server, 53);
+        let timeout = Duration::from_millis(self.timeout as u64);
         let runtime = Runtime::new().unwrap();
         let mut client: AsyncClient = match question.proto {
-            Protocol::UDP => Self::new_udp_client(&runtime, address),
-            Protocol::TCP => Self::new_tcp_client(&runtime, address),
+            Protocol::UDP => Self::new_udp_client(&runtime, address, timeout),
+            Protocol::TCP => Self::new_tcp_client(&runtime, address, timeout),
         };
         let mut failures = Vec::new();
         let mut final_outcome = None;
@@ -297,7 +299,7 @@ impl Net {
                         query_duration,
                         kind: (&failure).into(),
                     });
-                    thread::sleep(Duration::from_secs(self.retrans as u64));
+                    thread::sleep(Duration::from_millis(self.retrans as u64));
                 }
                 outcome => {
                     final_outcome = Some((outcome, query_start, query_duration));
@@ -322,8 +324,6 @@ impl Net {
         let start_time = SystemTime::now();
         let outcome = runtime.block_on(query);
         let end_time = SystemTime::now();
-        eprintln!("start {:?}", start_time);
-        eprintln!("end   {:?}", end_time);
         let query_duration = end_time
             .duration_since(start_time)
             .expect("Time went backwards during request")
@@ -335,19 +335,18 @@ impl Net {
         (outcome, query_time, query_duration)
     }
 
-    fn new_udp_client(runtime: &Runtime, address: SocketAddr) -> AsyncClient {
+    fn new_udp_client(runtime: &Runtime, address: SocketAddr, timeout: Duration) -> AsyncClient {
         use tokio::net::UdpSocket;
         use trust_dns_client::udp::UdpClientStream;
 
-        let stream = UdpClientStream::<UdpSocket>::new(address);
+        let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
         let client = AsyncClient::connect(stream);
         let (client, bg) = runtime.block_on(client).expect("connection failed");
         runtime.spawn(bg);
         client
     }
 
-    fn new_tcp_client(runtime: &Runtime, address: SocketAddr) -> AsyncClient {
-        use std::time::Duration;
+    fn new_tcp_client(runtime: &Runtime, address: SocketAddr, timeout: Duration) -> AsyncClient {
         use tokio::net::TcpStream;
         use trust_dns_client::rr::dnssec::Signer;
         use trust_dns_client::tcp::TcpClientStream;
@@ -357,10 +356,7 @@ impl Net {
         use trust_dns_proto::xfer::DnsMultiplexerConnect;
 
         let (tcp_client_stream, handle) =
-            TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(
-                address,
-                Duration::from_secs(5),
-            );
+            TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(address, timeout);
         let stream: DnsMultiplexerConnect<
             TcpClientConnect<AsyncIoTokioAsStd<TcpStream>>,
             TcpClientStream<AsyncIoTokioAsStd<TcpStream>>,
