@@ -17,7 +17,7 @@ Netbase is short for network database.
 To build netbase you need these:
 * FFI::Build::MM
 * FFI::Build::File::Rust
-* cargo/rustc (rustc >= 1.56)
+* [cargo/rustc] (rustc >= 1.56)
 
 In case you need to build FFI::Build::MM yourself you probably need these too:
 * gcc
@@ -245,4 +245,4 @@ feature.
 * Add support for ASN lookups.
   Both the Cymru and Ripe protocols.
 
-[Rustup]: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+[cargo/rustc]: https://rustup.rs/
