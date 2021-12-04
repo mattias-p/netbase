@@ -121,6 +121,38 @@ Either it gives an error response indicating that the request is not in the
 cache, or it transparently sends a network request and records the response in
 the cache before returning it.
 
+## Architecture
+
+Netbase consists of two interfaces: a library and a CLI tool.
+
+The CLI tool implements a few use cases that exercises all of the library API.
+
+The library consists of three parts.
+
+1. The business logic.
+   This is where the actual functionality lives.
+   It is implemented in safe Rust.
+   Notably it uses trust_dns rather than ldns for making DNS requests.
+
+   Another option would be to add Rust bindings for ldns so we can continue to
+   use that.
+
+2. The C API.
+   This part defines C bindings for the business logic and exports them from a
+   shared object.
+   It is implemented in unsafe Rust.
+
+3. The Perl API.
+   This defines idiomatic Perl bindings for the C API.
+   It is implemented in in pure Perl.
+   It uses FFI::Platypus to attach the exported functions and perform the
+   necessary type conversions.
+
+   Another option would be to implement this part in XS and bypass
+   FFI::Platypus.
+   That would likely end up being slightly more performant but considerably more
+   difficult and error prone.
+
 ## Status
 
 ### Done (beta quality)
