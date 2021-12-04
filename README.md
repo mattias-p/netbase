@@ -175,6 +175,27 @@ The library consists of three parts.
    That would likely end up being slightly more performant but considerably more
    difficult and error prone.
 
+## Integration with Zonemaster
+
+Netbase reimplements a small part of Zonemaster Engine and replaces most but not
+all of Zonemaster LDNS.
+
+The part of LDNS that is left out from Netbase is the fallback mechanism for
+switching protocols when a truncated response is received.
+It's helpful to have a record of the truncated response when debugging, so this
+mechanism is best implemented above the caching layer.
+Since Netbase is all about the caching it seems like a bad idea to add features
+below the Netbase interface but above the cache layer.
+
+Today the caching implementation is located in the
+Zonemaster::Engine::Nameserver and Zonemaster::Engine::Nameserver::Cache
+modules.
+The latter module has no other purpose, but the former implements a few other
+features.
+If ought to be fairly easy to rip out the current caching implementation and
+hook up Netbase instead remembering of course to include the truncation fallback
+feature.
+
 ## Status
 
 ### Done (beta quality)
