@@ -2,51 +2,6 @@
 
 Netbase is short for network database.
 
-## Scope
-
-Netbase has two major features.
-It sends simple network (DNS) requests and keeps a cache of already sent
-requests.
-
-Netbase has two major interfaces.
-One Perl API and one CLI tool.
-The Perl API is meant to be used from Zonemaster Engine.
-The CLI tool exercises the Perl API and provides a convenient way to inspect and
-work with saved cache files without having to parse them yourself or go through
-the entire machinery of Zonemaster Engine.
-
-The scope of Netbase is somewhat similar to Zonemaster::LDNS but there are
-important differences.
-Netbase does more in the sense that it integrates a cache.
-But it also does less in the sense that it does not implement fallbacks between
-protocols to handle truncation.
-
-## Cache
-
-The cache is basically a mapping from requests to responses.
-
-It contains a complete record of all requests that have been sent.
-Every request is marked with a time stamp and a duration representing the time
-(UTC) when the request was sent and the time taken before a response was
-received or an error occurred.
-When a request fails and is retried each attempt is recorded and time stamped.
-
-A request is represented by a normalized logical description from which an
-actual request can be generated.
-Two requests that differ only in what protocol they are sent over are given
-distinct representations.
-
-## Cache miss strategies
-
-When a request is made that has a cached response, that response is returned and
-no network request.
-
-When there is no cached response Netbase has two strategies for you to choose
-from.
-Either it gives an error response indicating that the request is not in the
-cache, or it transparently sends a network request and records the response in
-the cache before returning it.
-
 ## Dependencies
 
 To build netbase you need the following:
@@ -70,6 +25,53 @@ netbase --help
 netbase --help query
 netbase --man
 ```
+
+## Scope
+
+Netbase has two major features.
+It sends simple network (DNS) requests and keeps a cache of already sent
+requests.
+
+Netbase has two major interfaces.
+One Perl API and one CLI tool.
+The Perl API is meant to be used from Zonemaster Engine.
+The CLI tool exercises the Perl API and provides a convenient way to inspect and
+work with saved cache files without having to parse them yourself or go through
+the entire machinery of Zonemaster Engine.
+
+The scope of Netbase is somewhat similar to Zonemaster::LDNS but there are
+important differences.
+Netbase does more in the sense that it integrates a cache.
+But it also does less in the sense that it does not implement fallbacks between
+protocols to handle truncation.
+
+## Features
+
+### Cache
+
+The cache is basically a mapping from requests to responses.
+
+It contains a complete record of all requests that have been sent.
+Every request is marked with a time stamp and a duration representing the time
+(UTC) when the request was sent and the time taken before a response was
+received or an error occurred.
+When a request fails and is retried each attempt is recorded and time stamped.
+
+A request is represented by a normalized logical description from which an
+actual request can be generated.
+Two requests that differ only in what protocol they are sent over are given
+distinct representations.
+
+### Cache miss strategies
+
+When a request is made that has a cached response, that response is returned and
+no network request.
+
+When there is no cached response Netbase has two strategies for you to choose
+from.
+Either it gives an error response indicating that the request is not in the
+cache, or it transparently sends a network request and records the response in
+the cache before returning it.
 
 ## Status
 
