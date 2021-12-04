@@ -2,6 +2,8 @@
 
 A library and CLI tool to make cached DNS and ASN lookups.
 
+N.B. ASN lookups aren't implemented yet.
+
 Netbase revolves around two central ideas.
 First, that every network request should be recorded in the cache.
 And second, that the cache miss strategy should be configurable to either simply
@@ -9,6 +11,34 @@ fail or to block while it's making a network request to populate the cache entry
 before returning.
 
 Netbase is short for network database.
+
+## Dependencies
+
+To build netbase you need these:
+* FFI::Build::MM
+* FFI::Build::File::Rust
+* cargo/rustc (rustc >= 1.56)
+
+In case you need to build FFI::Build::MM yourself you probably need these too:
+* gcc
+* OpenSSL development header
+
+## Install
+
+```sh
+perl Makefile.PL
+sudo make install
+```
+
+## Run
+
+These are the major ways to access the documentation:
+
+```sh
+netbase --help
+netbase --help query
+netbase --man
+```
 
 ## Rationale
 
@@ -71,30 +101,6 @@ Using trust_dns was simply easier to get started with.
 Since we're starting out with trust_dns we should evaluate that first.
 If trust_dns doesn't measure up we still have the option to create Rust bindings
 for good old ldns.
-
-## Dependencies
-
-To build netbase you need the following:
-* FFI::Build::MM
-* FFI::Build::File::Rust
-* rustc >= 1.56.0
-
-## Install
-
-```sh
-perl Makefile.PL
-sudo make install
-```
-
-## Run
-
-These are the major ways to access the documentation:
-
-```sh
-netbase --help
-netbase --help query
-netbase --man
-```
 
 ## Scope
 
@@ -257,3 +263,5 @@ feature.
   additional sections. (To be used with AXFR requests.)
 * Add support for ASN lookups.
   Both the Cymru and Ripe protocols.
+
+[Rustup]: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
