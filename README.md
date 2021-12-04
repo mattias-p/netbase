@@ -162,7 +162,7 @@ The library consists of three parts.
    That would likely end up being slightly more performant but considerably more
    difficult and error prone.
 
-## Integration with Zonemaster
+### Integration with Zonemaster
 
 Netbase reimplements a small part of Zonemaster Engine and replaces most but not
 all of Zonemaster LDNS.
