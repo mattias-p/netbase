@@ -102,25 +102,6 @@ Since we're starting out with trust_dns we should evaluate that first.
 If trust_dns doesn't measure up we still have the option to create Rust bindings
 for good old ldns.
 
-## Scope
-
-Netbase has two major features.
-It sends simple network (DNS) requests and keeps a cache of already sent
-requests.
-
-Netbase has two major interfaces.
-One Perl API and one CLI tool.
-The Perl API is meant to be used from Zonemaster Engine.
-The CLI tool exercises the Perl API and provides a convenient way to inspect and
-work with saved cache files without having to parse them yourself or go through
-the entire machinery of Zonemaster Engine.
-
-The scope of Netbase is somewhat similar to Zonemaster::LDNS but there are
-important differences.
-Netbase does more in the sense that it integrates a cache.
-But it also does less in the sense that it does not implement fallbacks between
-protocols to handle truncation.
-
 ## Features
 
 ### Cache
