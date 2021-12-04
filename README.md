@@ -24,16 +24,20 @@ So the scope of Netbase does not stretch above caching.
 
 While already at the time of writing the general design of the caching
 implementation is very good there are a few wrinkles.
+
 * Neither AXFR requests nor ASN lookups are included in the cache.
   This is problematic for the unit tests as well as when you want to save a
   recorded cache for later analysis.
+
 * Timed out or otherwise failed request that result in retries are not include
   in the cache.
   Having this information in plain sight would be helpful when investigating
   behaviors of both the network and of Zonemaster Engine itself.
+
 * There is no convenient way to list or dump the contents of a saved cache file.
   This would be very helpful when investigating why Zonemaster makes a certain
   analysis.
+
 * There is no convenient way to make lookups into a cache file for specific
   requests or to update it with single requests.
   This would be useful in various development and troubleshooting contexts.
@@ -46,9 +50,27 @@ them.
 Having those lets us try out the API with simple requests while it's being
 developed.
 
+### Technology choices
+
 When it came to the choice of language I simply settled on Rust.
 It's very performant, very reliable and if you ask me it's generally nice to be
 around.
+
+Once the C API is well defined and stable we should stop and think about whether
+Rust is the compiled language we want to use.
+If we decide it is then good.
+In case we aren't sure we can just reimplement the C API using a different
+language.
+This should be considerably easier than remaking this entire proof-of-concept
+from scratch.
+
+When it came to the choice of DNS library I opted to use trust_dns instead of
+ldns which we're happy with in Zonemaster today.
+To call ldns from Rust we'd have to create Rust bindings for it.
+Using trust_dns was simply easier to get started with.
+Since we're starting out with trust_dns we should evaluate that first.
+If trust_dns doesn't measure up we still have the option to create Rust bindings
+for good old ldns.
 
 ## Dependencies
 
