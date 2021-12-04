@@ -1,6 +1,54 @@
 # Netbase
 
+A library and CLI tool to make cached DNS and ASN lookups.
+
+Netbase revolves around two central ideas.
+First, that every network request should be recorded in the cache.
+And second, that the cache miss strategy should be configurable to either simply
+fail or to block while it's making a network request to populate the cache entry
+before returning.
+
 Netbase is short for network database.
+
+## Rationale
+
+For several years the Zonemaster team has been throwing around the idea of
+speeding up Zonemaster by reimplementing parts of it in a compiled language.
+The part where reimplementation would make the most sense has been identified as
+the low-level parts around networking in Zonemaster Engine.
+I.e. the part to focus reimplementation on would be the caching.
+
+I'm believer in the Unix philosophy to do one thing and do it well.
+I'm also a believer in small steps.
+So the scope of Netbase does not stretch above caching.
+
+While already at the time of writing the general design of the caching
+implementation is very good there are a few wrinkles.
+* Neither AXFR requests nor ASN lookups are included in the cache.
+  This is problematic for the unit tests as well as when you want to save a
+  recorded cache for later analysis.
+* Timed out or otherwise failed request that result in retries are not include
+  in the cache.
+  Having this information in plain sight would be helpful when investigating
+  behaviors of both the network and of Zonemaster Engine itself.
+* There is no convenient way to list or dump the contents of a saved cache file.
+  This would be very helpful when investigating why Zonemaster makes a certain
+  analysis.
+* There is no convenient way to make lookups into a cache file for specific
+  requests or to update it with single requests.
+  This would be useful in various development and troubleshooting contexts.
+
+Solving the first two wrinkles is easy if we're reimplementing these parts of
+the code anyway.
+
+Solving the last two wrinkles at this point is arguably easier than not solving
+them.
+Having those lets us try out the API with simple requests while it's being
+developed.
+
+When it came to the choice of language I simply settled on Rust.
+It's very performant, very reliable and if you ask me it's generally nice to be
+around.
 
 ## Dependencies
 
