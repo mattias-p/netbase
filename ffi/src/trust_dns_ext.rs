@@ -13,6 +13,7 @@ pub struct DigMessage<'a>(&'a Message);
 impl<'a> fmt::Display for DigMessage<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use trust_dns_client::op::MessageType;
+        use trust_dns_client::rr::rdata::opt::EdnsOption;
 
         let header = self.0.header();
         writeln!(
@@ -47,8 +48,35 @@ impl<'a> fmt::Display for DigMessage<'a> {
             header.name_server_count(),
             header.additional_count()
         )?;
-        if header.query_count() > 0 {
+
+        if let Some(edns) = self.0.edns() {
             writeln!(f)?;
+            writeln!(f, ";; OPT PSEUDOSECTION:")?;
+            write!(f, "; EDNS: version: {}, flags:", edns.version())?;
+            if edns.dnssec_ok() {
+                write!(f, " do")?;
+            }
+            writeln!(f, "; udp: {}:", edns.max_payload())?;
+            for (code, data) in edns.options().as_ref() {
+                match data {
+                    EdnsOption::DAU(algo) | EdnsOption::DHU(algo) | EdnsOption::N3U(algo) => {
+                        writeln!(f, "{:?}: {:?}", code, algo)?
+                    }
+                    EdnsOption::Unknown(_, data) => {
+                        write!(f, "{:?}: ", code)?;
+                        for byte in data {
+                            write!(f, "{:02x}", byte)?;
+                        }
+                        writeln!(f)?;
+                    }
+                }
+            }
+        }
+
+        if header.query_count() > 0 {
+            if self.0.edns().is_none() {
+                writeln!(f)?;
+            }
             writeln!(f, ";; QUESTION SECTION:")?;
             for query in self.0.queries() {
                 writeln!(
