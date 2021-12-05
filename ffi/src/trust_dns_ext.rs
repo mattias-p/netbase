@@ -7,43 +7,12 @@ use std::fmt;
 use std::rc::Rc;
 use trust_dns_client::op::Message;
 use trust_dns_client::proto::error::ProtoError;
-use trust_dns_client::rr::RData;
 
 pub struct DigMessage<'a>(&'a Message);
 
 impl<'a> fmt::Display for DigMessage<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use trust_dns_client::op::MessageType;
-        use trust_dns_client::rr::Record;
-
-        fn write_record(f: &mut fmt::Formatter, record: &Record) -> fmt::Result {
-            write!(
-                f,
-                "{}  {}  {}  {}  ",
-                record.name(),
-                record.ttl(),
-                record.record_type(),
-                record.dns_class(),
-            )?;
-            match record.rdata() {
-                RData::A(addr) => writeln!(f, "{}", addr),
-                RData::AAAA(addr) => writeln!(f, "{}", addr),
-                RData::CNAME(name) | RData::NS(name) | RData::PTR(name) => writeln!(f, "{}", name),
-                RData::MX(mx) => writeln!(f, "{}  {}", mx.preference(), mx.exchange()),
-                RData::SOA(soa) => writeln!(
-                    f,
-                    "{}  {}  {}  {}  {}  {}  {}",
-                    soa.mname(),
-                    soa.rname(),
-                    soa.serial(),
-                    soa.refresh(),
-                    soa.retry(),
-                    soa.expire(),
-                    soa.minimum()
-                ),
-                rdata => writeln!(f, "{:?}", rdata),
-            }
-        }
 
         let header = self.0.header();
         writeln!(
@@ -95,21 +64,21 @@ impl<'a> fmt::Display for DigMessage<'a> {
             writeln!(f)?;
             writeln!(f, ";; ANSWER SECTION:")?;
             for record in self.0.answers() {
-                write_record(f, record)?;
+                writeln!(f, "{}", record)?;
             }
         }
         if header.name_server_count() > 0 {
             writeln!(f)?;
             writeln!(f, ";; AUTHORITY SECTION:")?;
             for record in self.0.name_servers() {
-                write_record(f, record)?;
+                writeln!(f, "{}", record)?;
             }
         }
         if header.additional_count() > 0 {
             writeln!(f)?;
             writeln!(f, ";; ADDITIONAL SECTION:")?;
             for record in self.0.additionals() {
-                write_record(f, record)?;
+                writeln!(f, "{}", record)?;
             }
         }
 

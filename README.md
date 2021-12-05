@@ -244,5 +244,6 @@ feature.
   additional sections. (To be used with AXFR requests.)
 * Add support for ASN lookups.
   Both the Cymru and Ripe protocols.
+* Include OPT pseudo-section in the output.
 
 [cargo/rustc]: https://rustup.rs/
