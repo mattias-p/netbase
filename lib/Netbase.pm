@@ -388,8 +388,14 @@ package Netbase::Question;
 
 $ffi->mangler( sub { "netbase_question_" . shift } );
 
-$ffi->attach( new       => [ 'string',     'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
-$ffi->attach( set_edns  => [ 'question_t', 'u8',     'u8',       'u16' ] );
+$ffi->attach( new => [ 'string', 'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
+$ffi->attach(
+    set_edns => [ 'question_t', 'u8', 'u8', 'u16', 'u8[]', 'usize' ],
+    sub {
+        my ( $xsub, $this, $version, $dnssec_ok, $option_code, $option_value ) = @_;
+        $xsub->( $this, $version, $dnssec_ok, $option_code, $option_value, length $option_value );
+    }
+);
 $ffi->attach( to_string => ['question_t'] => 'string' );
 $ffi->attach( DESTROY   => ['question_t'] );
 

@@ -327,13 +327,25 @@ pub extern "C" fn netbase_question_set_edns(
     version: u8,
     dnssec_ok: u8,
     option_code: u16,
+    option_value: *const u8,
+    option_value_len: usize,
 ) {
+    eprintln!("len {:08x?}", option_value_len);
     let this = unsafe { &mut *(this as *mut Question) };
     let dnssec_ok = dnssec_ok != 0;
+    let option_value = ptr::slice_from_raw_parts(option_value, option_value_len);
+    let option_value_slice = unsafe { &*option_value };
+    let option_value = {
+        let mut tmp = Vec::with_capacity(option_value_len);
+        tmp.extend_from_slice(option_value_slice);
+        tmp
+    };
+
     this.edns_config = Some(EdnsConfig {
         version,
         dnssec_ok,
         option_code,
+        option_value,
     });
 }
 

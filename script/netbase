@@ -53,6 +53,8 @@ sub main {
     return;
 }
 
+use Data::Dumper;
+
 sub do_query {
     my @args = @_;
 
@@ -120,12 +122,30 @@ sub do_query {
         'recurse!'   => \$opt_recurse,
         'noedns+'    => sub { $opt_edns_version = undef },
         'edns=i'     => \$opt_edns_version,
-        'ednsopt=i'  => \$opt_edns_opt,
+        'ednsopt=s'  => \$opt_edns_opt,
         'noednsopt+' => sub { $opt_edns_opt = undef },
         'dnssec!'    => \$opt_dnssec,
     ) or usage_err( "Error in command line arguments", "query" );
 
-    if ( $opt_edns_version || $opt_dnssec || $opt_edns_opt ) {
+    my $edns_opt_code;
+    my $edns_opt_value;
+    if ( defined $opt_edns_opt ) {
+        my ( $code, $value ) = split /:/, $opt_edns_opt, 2;
+        $code =~ /^([0-9]+)$/    #
+          or usage_err( "Invalid ednsopt code given", "query" );
+        $edns_opt_code = $1;
+
+        if ( defined $value ) {
+            $value =~ /^((:?[0-9a-f]{2})+)$/i    #
+              or usage_err( "Invalid ednsopt value given", "query" );
+            $edns_opt_value = [ map ord, split //, pack "H*", $1 ];
+        }
+        else {
+            $edns_opt_value = "";
+        }
+    }
+
+    if ( $opt_edns_version || $opt_dnssec || $edns_opt_code ) {
         $opt_edns_version //= 0;
         $opt_dnssec       //= 0;
     }
@@ -135,9 +155,9 @@ sub do_query {
           if $opt_edns_version < 0 || $opt_edns_version > 255;
 
         usage_err( "EDNS option code out of range", "query" )
-          if defined $opt_edns_opt && ( $opt_edns_opt < 1 || $opt_edns_opt > 65535 );
+          if defined $edns_opt_code && ( $edns_opt_code < 1 || $edns_opt_code > 65535 );
     }
-    my $edns_opt = $opt_edns_opt // 0;
+    $edns_opt_code //= 0;
 
     # Parse qname, qtype and server
     my @nss = grep { $_ =~ /^@/ } @args;
@@ -167,7 +187,7 @@ sub do_query {
         }
     );
     if ( defined $opt_edns_version ) {
-        $question->set_edns( $opt_edns_version, $opt_dnssec, $edns_opt );
+        $question->set_edns( $opt_edns_version, $opt_dnssec, $edns_opt_code, $edns_opt_value );
     }
 
     # Initialize cache

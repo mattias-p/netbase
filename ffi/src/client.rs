@@ -52,6 +52,7 @@ pub struct EdnsConfig {
     pub version: u8,
     pub dnssec_ok: bool,
     pub option_code: u16,
+    pub option_value: Vec<u8>,
     //pub set_z_flag: bool, TODO: implement this
 }
 
@@ -99,7 +100,7 @@ impl From<Question> for DnsRequest {
             edns.set_dnssec_ok(edns_config.dnssec_ok);
             if edns_config.option_code != 0 {
                 edns.options_mut()
-                    .insert(EdnsOption::Unknown(edns_config.option_code, vec![]));
+                    .insert(EdnsOption::Unknown(edns_config.option_code, edns_config.option_value));
             }
         }
 
