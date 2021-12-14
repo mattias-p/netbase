@@ -63,6 +63,8 @@ sub do_query {
     my $opt_write;
     my $opt_update;
     my $opt_network;
+    my $opt_qtype;
+    my $opt_qname;
     my $opt_timeout = 5;
     my $opt_retry   = 3;
     my $opt_retrans = 1;
@@ -76,6 +78,8 @@ sub do_query {
         "timeout=f"  => \$opt_timeout,
         "retry=i"    => \$opt_retry,
         "retrans=f"  => \$opt_retrans,
+        "q|qname=s"  => \$opt_qname,
+        "t|qtype=s"  => \$opt_qtype,
     ) or usage_err( "Error in command line arguments", "query" );
 
     if ( defined $opt_update ) {
@@ -160,23 +164,39 @@ sub do_query {
     $edns_opt_code //= 0;
 
     # Parse qname, qtype and server
-    my @nss = grep { $_ =~ /^@/ } @args;
-    @args = grep { $_ !~ /^@/ } @args;
+    my $opt_ns;
+    for my $arg ( @args ) {
+        if ( $arg =~ /^@/ ) {
+            usage_err( "Multiple server addresses given", "query" )
+              if defined $opt_ns;
+            $opt_ns = $arg;
+        }
+        elsif ( rrtype( $arg ) ) {
+            usage_err( "Multiple qtype values given", "query" )
+              if defined $opt_qtype;
+            $opt_qtype = $arg;
+        }
+        elsif ( name( $arg ) ) {
+            usage_err( "Multiple qname values given", "query" )
+              if defined $opt_qname;
+            $opt_qname = $arg;
+        }
+        else {
+            usage_err( "Unrecognized argument given: $arg", "query" );
+        }
+    }
 
     my $qname = name(
-        shift @args // usage_err( "No qname given", "query" )    #
+       $opt_qname // usage_err( "No qname given", "query" )    #
     ) // usage_err( "Invalid qname given", "query" );
 
     my $qtype = name(
-        shift @args // usage_err( "No qtype given", "query" )    #
+        $opt_qtype // usage_err( "No qtype given", "query" )    #
     ) // usage_err( "Invalid qtype given", "query" );
 
     my $ns = parse_ns(
-        pop @nss // usage_err( "No server given", "query" )    #
+        $opt_ns // usage_err( "No server given", "query" )    #
     ) // usage_err( "Invalid name server address given", "query" );
-
-    usage_err( "Extra arguments given", "query" )
-      if @args || @nss;
 
     # Construct question
     my $question = question(
@@ -442,13 +462,13 @@ netbase query - Perform a single lookup
 
 =head2 USAGE
 
-netbase query -n [-r FILE] NAME TYPE SERVER [query options]
+netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query -r FILE [-w FILE] NAME TYPE SERVER [query options]
+netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query -w FILE NAME TYPE SERVER [query options]
+netbase query -w FILE [-q] NAME [-t] TYPE SERVER [query options]
 
-netbase query -u FILE NAME TYPE SERVER [query options]
+netbase query -u FILE [-q] NAME [-t] TYPE SERVER [query options]
 
 =head2 MODES
 
@@ -506,17 +526,28 @@ Default is 1.
 
 =over 4
 
-=item B<NAME>
-
-The qname to ask for in the request.
-
-=item B<TYPE>
-
-The qtype to ask for in the request.
-
 =item B<SERVER>
 
 The syntax for a SERVER is an at-sign (@) immediately followed by an IP address.
+
+=item B<TYPE>
+
+Short for B<--qtype TYPE>.
+
+=item B<NAME>
+
+Short for B<--qname NAME>.
+
+B<Note>: When using this syntax NAME must not be a valid TYPE or it will be interpreted
+as a TYPE.
+
+=item B<-q NAME>, B<--qname NAME>
+
+The qname to ask for in the request.
+
+=item B<-t TYPE>, B<--qtype TYPE>
+
+The qtype to ask for in the request.
 
 =back
 
