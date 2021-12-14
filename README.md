@@ -174,14 +174,63 @@ mechanism is best implemented above the caching layer.
 Since Netbase is all about the caching it seems like a bad idea to add features
 below the Netbase interface but above the cache layer.
 
-Today the caching implementation is located in the
-Zonemaster::Engine::Nameserver and Zonemaster::Engine::Nameserver::Cache
-modules.
-The latter module has no other purpose, but the former implements a few other
-features.
-If ought to be fairly easy to rip out the current caching implementation and
-hook up Netbase instead remembering of course to include the truncation fallback
-feature.
+#### Stage 1: Networking
+
+At this stage we replace the querying of normal requests to use trust_dns
+instead of ldns.
+I.e. non-AXFR requests.
+
+Update Zonemaster::Engine::Nameserver::query to:
+* Call Netbase::Net::query for the actual query and take care of the returned
+  wire formatted response.
+* Construct a Zonemaster::Engine::Packet using the response.
+* Implement the TC-flag fallback.
+
+Make a benchmark of the performance difference between making queries with ldns
+and trust_dns penalized with extra deserialization.
+
+#### Stage 2: Packet inspection
+
+At this stage we make Zonemaster Engine use trust_dns's native response
+representation.
+
+* Implement Perl bindings for all parts of trust_dns needed to replace
+  Zonemaster::LDNS::Packet.
+* Update Zonemaster::Engine::Nameserver::query to not deserialize wire formatted
+  responses.
+* Without changing the public interface of Zonemaster::Engine::Packet, replace
+  its implementation with Netbase.
+
+Make a benchmark of the performance difference between making queries with ldns
+and trust_dns without penalization.
+
+#### Stage 3: Caching
+
+At this stage we replace the caching code with a compiled version.
+
+* Without changing the public interface of Zonemaster::Engine::Nameserver and
+  Zonemaster::Engine::Nameserver::Cache, replace their implementations to use
+  Netbase::Cache instead.
+
+Make a benchmark of the performance difference between the pure Perl and
+compiled implementations of the cache.
+
+#### Stage 4: AXFR
+
+At this stage we replace the querying of AXFR requests to use trust_dns instead
+of ldns.
+
+* Update Zonemaster::Engine::Nameserver::axfr to use Netbase::Cache instead of
+  Zonemaster::LDNS.
+
+This stage is not about performance and should not affect it much, but why not
+make a benchmark of it anyway?
+
+#### Stage 5: Cleaning up
+
+At this stage we make Zonemaster Engine independent of Zonemaster LDNS.
+
+Remove Zonemaster LDNS as a dependency from Zonemaster Engine.
 
 ## Status
 
@@ -244,6 +293,5 @@ feature.
   additional sections. (To be used with AXFR requests.)
 * Add support for ASN lookups.
   Both the Cymru and Ripe protocols.
-* Include OPT pseudo-section in the output.
 
 [cargo/rustc]: https://rustup.rs/
