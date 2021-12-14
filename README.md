@@ -240,21 +240,18 @@ Remove Zonemaster LDNS as a dependency from Zonemaster Engine.
 * Configurable timeout waiting for requests.
 * Retrying failed requests with a delay in between tries.
 * Configurable qname, qtype and RD flag in requests.
+* Configurable EDNS header and fields. EDNS version and DO flag are complete. Option code
+  support is sufficient for Zonemaster.
 * Saving and loading cache files.
 * Making lookups against the cache only. (I.e. without making network requests.)
 * Usage documenation for all implemented features in the CLI tool.
 * Listing all requests in a cache file.
 * Dumping the complete contents of a cache file.
+* Dig-like output from CLI tool. (Incl. all record types and OPT pseudo section.)
 
 ### In progress
-* Proper RDATA formatting for all record types.
-* Configurable EDNS header and fields. The EDNS version, DO flag and option code
-  are done.
-  The only thing missing is setting the Z flags.
-  N.B. the support for setting option codes is limited, but sufficient for
-  Zonemaster Engine.
-* The CLI of the tool could probably use some tweaking before it's declared
-  stable, but I feel pretty good about its general shape.
+* The CLI of the tool could probably use some tweaking of the mode options
+  before it's declared stable, but I feel pretty good about its general shape.
 
 ### ToDo
 
@@ -264,7 +261,8 @@ Remove Zonemaster LDNS as a dependency from Zonemaster Engine.
 * Support setting EDNS Z flags in requests.
   (https://docs.rs/trust-dns-client/latest/trust_dns_client/op/struct.Edns.html)
 * Review the implemented feature set.
-  Could Netbase support Zonemaster Engine without adding additional features?
+  Could Netbase support Zonemaster Engine without adding additional features or
+  modifications?
 * Add accessors for all parts of a DNS response that we need.
 
 #### Robustness
