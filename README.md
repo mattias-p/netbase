@@ -15,13 +15,13 @@ Netbase is short for network database.
 ## Dependencies
 
 To build netbase you need these:
-* FFI::Build::MM
-* FFI::Build::File::Rust
+* [FFI::Build::MM]
+* [FFI::Build::Lang::Rust]
 * [cargo/rustc] (rustc >= 1.56)
 
 In case you need to build FFI::Build::MM yourself you probably need these too:
 * gcc
-* OpenSSL development header
+* OpenSSL development headers
 
 ## Install
 
@@ -317,3 +317,5 @@ Implement concurrent querying of multiple servers using the same question.
   Both the Cymru and Ripe protocols.
 
 [cargo/rustc]: https://rustup.rs/
+[FFI::Build::MM]: https://metacpan.org/pod/FFI::Build::MM
+[FFI::Build::Lang::Rust]: https://metacpan.org/pod/FFI::Platypus::Lang::Rust
