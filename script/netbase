@@ -9,7 +9,7 @@ use Getopt::Long qw( GetOptionsFromArray );
 use Netbase qw( ip proto name question rrtype :proto );
 use Pod::Usage qw( pod2usage );
 
-const my %ALL_COMMANDS => (
+const my %ALL_SUBCOMMANDS => (
     query => \&do_query,
     dump  => \&do_dump,
     list  => \&do_list,
@@ -35,9 +35,9 @@ sub main {
 
     my $cmd_name = shift @args;
     my $cmd_sub  = (
-        exists $ALL_COMMANDS{$cmd_name}
-        ? $ALL_COMMANDS{$cmd_name}
-        : usage_err( "Unrecognized command" )
+        exists $ALL_SUBCOMMANDS{$cmd_name}
+        ? $ALL_SUBCOMMANDS{$cmd_name}
+        : usage_err( "Unrecognized subcommand" )
     ) if defined $cmd_name;
 
     do_help( $cmd_name )
@@ -45,7 +45,7 @@ sub main {
     pod2usage( -verbose => 2 )
       if $opt_man;
 
-    usage_err( "No command given" )
+    usage_err( "No subcommand given" )
       if !defined $cmd_sub;
 
     $cmd_sub->( @args );
@@ -53,52 +53,35 @@ sub main {
     return;
 }
 
-use Data::Dumper;
-
 sub do_query {
     my @args = @_;
 
     # Parse mode and config options
     my $opt_read;
-    my $opt_write;
     my $opt_update;
-    my $opt_network;
-    my $opt_qtype;
+    my $opt_create;
+    my $opt_force;
     my $opt_qname;
+    my $opt_qtype;
     my $opt_timeout = 5;
     my $opt_retry   = 3;
     my $opt_retrans = 1;
     Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-        "n|network"  => \$opt_network,
         "r|read=s"   => \$opt_read,
-        "w|write=s"  => \$opt_write,
         "u|update=s" => \$opt_update,
+        "c|create=s" => \$opt_create,
+        "f|force"    => \$opt_force,
+        "q|qname=s"  => \$opt_qname,
+        "t|qtype=s"  => \$opt_qtype,
         "timeout=f"  => \$opt_timeout,
         "retry=i"    => \$opt_retry,
         "retrans=f"  => \$opt_retrans,
-        "q|qname=s"  => \$opt_qname,
-        "t|qtype=s"  => \$opt_qtype,
-    ) or usage_err( "Error in command line arguments", "query" );
+    ) or usage_err( "Error in subcommand line arguments", "query" );
 
-    if ( defined $opt_update ) {
-        usage_err( "Must not specify both --update and --read", "query" )
-          if defined $opt_read;
-
-        usage_err( "Must not specify both --update and --write", "query" )
-          if defined $opt_write;
-
-        $opt_read  = $opt_update;
-        $opt_write = $opt_update;
-    }
-
-    if ( defined $opt_write ) {
-        $opt_network = 1;
-    }
-
-    usage_err( "Must specify at least one of --network, --read, --write or --update", "query" )
-      if !defined $opt_network && !defined $opt_read;
+    usage_err( "Must not specify more than one of --create, --update, --read", "query" )
+      if scalar( grep { defined $_ } $opt_create, $opt_update, $opt_read ) > 1;
 
     usage_err( "Value out of range for --timeout", "query" )
       if $opt_timeout < 0 || $opt_timeout > 1000;
@@ -129,7 +112,7 @@ sub do_query {
         'ednsopt=s'  => \$opt_edns_opt,
         'noednsopt+' => sub { $opt_edns_opt = undef },
         'dnssec!'    => \$opt_dnssec,
-    ) or usage_err( "Error in command line arguments", "query" );
+    ) or usage_err( "Error in subcommand line arguments", "query" );
 
     my $edns_opt_code;
     my $edns_opt_value;
@@ -210,12 +193,17 @@ sub do_query {
         $question->set_edns( $opt_edns_version, $opt_dnssec, $edns_opt_code, $edns_opt_value );
     }
 
+    # Check clobber
+    if ( defined $opt_create && !$opt_force && -e $opt_create ) {
+        die "Aborting: File already exists: $opt_create\n";
+    }
+
     # Initialize cache
-    my $cache = init_cache( $opt_read );
+    my $cache = init_cache( $opt_read // $opt_update, defined $opt_update && $opt_force );
 
     # Initialize networking
     my $net;
-    if ( defined $opt_network ) {
+    if ( defined $opt_create || defined $opt_update || $opt_force ) {
         $net = Netbase::Net->new(
             timeout => $opt_timeout,
             retry   => $opt_retry,
@@ -228,8 +216,8 @@ sub do_query {
     show_all_attempts( $cache, $question, $ns, @outcome );
 
     # Save cache
-    if ( $opt_write ) {
-        write_file $opt_write, { binmode => ':raw' }, $cache->to_bytes();
+    if ( defined ( my $file = $opt_create // $opt_update ) ) {
+        write_file $file, { binmode => ':raw' }, $cache->to_bytes();
     }
 
     return;
@@ -241,7 +229,7 @@ sub do_list {
     Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-    ) or usage_err( "Error in command line arguments", "list" );
+    ) or usage_err( "Error in subcommand line arguments", "list" );
 
     my $arg_file = shift( @args )    #
       // usage_err( "No cache file given", "list" );
@@ -250,7 +238,7 @@ sub do_list {
         usage_err( "Extra arguments given", "dump" );
     }
 
-    my $cache = init_cache( $arg_file );
+    my $cache = init_cache( $arg_file, 0 );
 
     $cache->for_each_request(
         sub {
@@ -268,7 +256,7 @@ sub do_dump {
     Getopt::Long::Configure qw( no_pass_through );
     GetOptionsFromArray(
         \@args,
-    ) or usage_err( "Error in command line arguments", "dump" );
+    ) or usage_err( "Error in subcommand line arguments", "dump" );
 
     my $arg_file = shift( @args )    #
       // usage_err( "No cache file given", "dump" );
@@ -277,7 +265,7 @@ sub do_dump {
         usage_err( "Extra arguments given", "dump" );
     }
 
-    my $cache = init_cache( $arg_file );
+    my $cache = init_cache( $arg_file, 0 );
 
     my @queries;
     $cache->for_each_request(
@@ -301,14 +289,18 @@ sub do_dump {
 }
 
 sub init_cache {
-    my ( $file ) = @_;
-    if ( $file ) {
-        my $contents = read_file( $file, { binmode => ':raw' } );
-        return Netbase::Cache->from_bytes( $contents );
+    my ( $file, $ignore_read_error ) = @_;
+
+    if ( defined $file ) {
+        my $contents = eval { read_file( $file, { binmode => ':raw' } ) };
+        if ( !$@ ) {
+            return Netbase::Cache->from_bytes( $contents );
+        }
+        if ( !$ignore_read_error ) {
+            die $@;
+        }
     }
-    else {
-        return Netbase::Cache->new();
-    }
+    return Netbase::Cache->new();
 }
 
 sub parse_ns {
@@ -380,10 +372,10 @@ sub do_help {
     my ( $cmd_name ) = @_;
 
     if ( defined $cmd_name ) {
-        pod2usage( -verbose => 99, -sections => "COMMAND netbase $cmd_name" );
+        pod2usage( -verbose => 99, -sections => "SUBCOMMAND: netbase $cmd_name" );
     }
     else {
-        pod2usage( -verbose => 99, -sections => "NAME|SYNOPSIS|OPTIONS|COMMANDS|DESCRIPTION" );
+        pod2usage( -verbose => 99, -sections => "NAME|SYNOPSIS|OPTIONS|SUBCOMMANDS|DESCRIPTION" );
     }
 
     return;
@@ -393,7 +385,7 @@ sub usage_err {
     my ( $message, $cmd_name ) = @_;
 
     if ( defined $cmd_name ) {
-        pod2usage( -msg => "netbase: $message", -verbose => 99, -sections => "COMMAND netbase $cmd_name/USAGE" );
+        pod2usage( -msg => "netbase: $message", -verbose => 99, -sections => "SUBCOMMAND: netbase $cmd_name/USAGE" );
     }
     else {
         pod2usage( "netbase: $message" );
@@ -414,11 +406,11 @@ netbase - DNS cache lookup utility
 
 netbase --help
 
-netbase --help COMMAND
+netbase --help SUBCOMMAND
 
 netbase --man
 
-netbase COMMAND [command_params]
+netbase SUBCOMMAND [subcommand arguments and options]
 
 =head1 OPTIONS
 
@@ -427,8 +419,8 @@ netbase COMMAND [command_params]
 =item B<--help>
 
 Print a brief help message and exit.
-If no command is given the help message concerns B<netbase> itself.
-If a command is given the help message concerns that command.
+If no subcommand is given the help message concerns B<netbase> itself.
+If a subcommand is given the help message concerns that subcommand.
 
 =item B<--man>
 
@@ -436,7 +428,7 @@ Print the full manual page and exit.
 
 =back
 
-=head1 COMMANDS
+=head1 SUBCOMMANDS
 
 =over 4
 
@@ -454,71 +446,57 @@ Dump all requests in the cache, along with their outcomes.
 
 =back
 
-=head1 COMMAND netbase query
+=head1 SUBCOMMAND: netbase query
 
-=head2 NAME
-
-netbase query - Perform a single lookup
+Perform a single lookup.
 
 =head2 USAGE
 
-netbase query -n [-r FILE] [-q] NAME [-t] TYPE SERVER [query options]
+netbase query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER [query and config options]
 
-netbase query -r FILE [-w FILE] [-q] NAME [-t] TYPE SERVER [query options]
-
-netbase query -w FILE [-q] NAME [-t] TYPE SERVER [query options]
-
-netbase query -u FILE [-q] NAME [-t] TYPE SERVER [query options]
-
-=head2 MODES
+=head2 MODE OPTIONS
 
 =over 4
-
-=item B<-n>, B<--network>
-
-If the given request is not answered in the cache, send the request over the
-network and record the outcome in the cache.
 
 =item B<-r FILE>, B<--read FILE>
 
-Initialize the cache from the given FILE.
-Must not be combined B<--update>.
-By default the cache is initialized to be empty.
+Make the request to the given cache file.
+If the request is not cached, an error message is printed.
+This subcommand aborts if the file does not exists.
 
-=item B<-w FILE>, B<--write FILE>
+If B<--force> is specified this mode is modified so that the request is sent
+over the network if the file does not exist.
 
-After the lookup, save the cache to the given FILE.
-By default any changes to the cache are dropped.
-Implicitly sets B<--network>.
-Must not be combined B<--update>.
+Must not be combined with B<--update> or B<--create>.
 
 =item B<-u FILE>, B<--update FILE>
 
-Short for B<--read FILE --write FILE>.
-Must not be combined with B<--read> nor with B<--write>.
+Make the request to the given cache file.
+If the request isn't in the cache then update it.
+This subcommand aborts if the file does not exists.
 
-=back
+If B<--force> is specified this mode is modified so that the file is created if
+it does not exist.
 
-=head2 CONFIG ARGUMENTS
+Must not be combined with B<--read> or B<--create>.
 
-=over 4
+=item B<-c FILE>, B<--create FILE>
 
-=item B<--timeout DURATION>
+Save the cache to a new file.
+This subcommand is aborted if the already file exists.
 
-Seconds to wait for a response without giving up.
-A floating point number with millisecond precision.
-Default is 5.
+If B<--force> is specified this mode is modified so that existing files are
+truncated and overwritten.
 
-=item B<--retry COUNT>
+Must not be combined B<--read> or B<--update>.
 
-Number of times to try a query before giving up.
-Default is 3.
+=item B<-f>, B<--force>
 
-=item B<--retrans DURATION>
+If this option is given together with another mode option it modifies that
+option.
+See the other mode options for details.
 
-Seconds of extra delay before retrying a request.
-A floating point number with millisecond precision.
-Default is 1.
+If it is given without any other mode option it is simply ignored.
 
 =back
 
@@ -576,7 +554,7 @@ Default is C<+edns 0> if at least one EDNS option is enabled.
 Enable/disable the DO flag in the EDNS header of the request.
 Default is C<+noednssec>.
 
-=item B<+ednsopt=CODE>, B<+noednsopt>
+=item B<+ednsopt CODE>, B<+noednsopt>
 
 Enable/disable the adding of the given option code to the EDNS header of the
 request.
@@ -584,11 +562,35 @@ Default is C<+noednsopt>.
 
 =back
 
-=head1 COMMAND netbase list
+=head2 CONFIG OPTIONS
 
-=head2 NAME
+These options are only considered when sending requests over the network.
+Not when making the cache lookup.
 
-netbase list - List all requests in the cache.
+=over 4
+
+=item B<--timeout DURATION>
+
+Seconds to wait for a response without giving up.
+A floating point number with millisecond precision.
+Default is 5.
+
+=item B<--retry COUNT>
+
+Number of times to try a query before giving up.
+Default is 3.
+
+=item B<--retrans DURATION>
+
+Seconds of extra delay before retrying a request.
+A floating point number with millisecond precision.
+Default is 1.
+
+=back
+
+=head1 SUBCOMMAND: netbase list
+
+List all requests in the cache.
 
 =head2 USAGE
 
@@ -604,11 +606,9 @@ Initialize the cache from the given FILE.
 
 =back
 
-=head1 COMMAND netbase dump
+=head1 SUBCOMMAND: netbase dump
 
-=head2 NAME
-
-netbase dump - Dump all requests in the cache, along with their outcomes.
+Dump all requests in the cache, along with their outcomes.
 
 =head2 USAGE
 

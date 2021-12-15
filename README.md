@@ -273,10 +273,6 @@ Implement concurrent querying of multiple servers using the same question.
 * Dumping the complete contents of a cache file.
 * Dig-like output from CLI tool. (Incl. all record types and OPT pseudo section.)
 
-### In progress
-* The CLI of the tool could probably use some tweaking of the mode options
-  before it's declared stable, but I feel pretty good about its general shape.
-
 ### ToDo
 
 #### Feature parity
