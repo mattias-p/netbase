@@ -164,6 +164,12 @@ The library consists of three parts.
 
 ### Integration with Zonemaster
 
+This section presents a migration plan for how Netbase could be integrated in
+Zonemaster Engine.
+
+The raison d'être of this proof of concept is to increase performance.
+This migration plan makes a point of benchmarking so we can see what we won.
+
 Netbase reimplements a small part of Zonemaster Engine and replaces most but not
 all of Zonemaster LDNS.
 
@@ -174,25 +180,28 @@ mechanism is best implemented above the caching layer.
 Since Netbase is all about the caching it seems like a bad idea to add features
 below the Netbase interface but above the cache layer.
 
+#### Stage 0: Reference benchmark
+
+* Develop a load test so we can measure how performance is affected as we make
+  changes to the implementation.
+* Make a benchmark of the performance using the current implementation.
+
 #### Stage 1: Networking
 
-At this stage we replace the querying of normal requests to use trust_dns
-instead of ldns.
+Replace the querying of normal requests to use trust_dns instead of ldns.
 I.e. non-AXFR requests.
 
-Update Zonemaster::Engine::Nameserver::query to:
-* Call Netbase::Net::query for the actual query and take care of the returned
-  wire formatted response.
-* Construct a Zonemaster::Engine::Packet using the response.
-* Implement the TC-flag fallback.
+* Update Zonemaster::Engine::Nameserver::query to:
+  * Call Netbase::Net::query for the actual query and take care of the returned
+    wire formatted response.
+  * Construct a Zonemaster::Engine::Packet using the response.
+  * Implement the TC-flag fallback.
+  * Make a benchmark when using trust_dns instead of ldns and with extra
+    translation of questions and responses from and to the old representations.
 
-Make a benchmark of the performance difference between making queries with ldns
-and trust_dns penalized with extra deserialization.
+#### Stage 2: Native responses
 
-#### Stage 2: Packet inspection
-
-At this stage we make Zonemaster Engine use trust_dns's native response
-representation.
+Make Zonemaster Engine use trust_dns's native response representation.
 
 * Implement Perl bindings for all parts of trust_dns needed to replace
   Zonemaster::LDNS::Packet.
@@ -200,37 +209,52 @@ representation.
   responses.
 * Without changing the public interface of Zonemaster::Engine::Packet, replace
   its implementation with Netbase.
+* Make a benchmark without translation of response representations.
 
-Make a benchmark of the performance difference between making queries with ldns
-and trust_dns without penalization.
+#### Stage 3: Native questions
 
-#### Stage 3: Caching
+Make Zonemaster Engine use Netbase's native question representation.
 
-At this stage we replace the caching code with a compiled version.
+* Refactgor Zonemaster::Engine::Nameserver::query and all its callers to use
+  Netbase::Question in the interface.
+* Make a benchmark without translation of question representations.
+
+#### Stage 4: Caching
+
+Replace the caching code with a compiled version.
 
 * Without changing the public interface of Zonemaster::Engine::Nameserver and
   Zonemaster::Engine::Nameserver::Cache, replace their implementations to use
   Netbase::Cache instead.
+* Make a benchmark with a compiled cache implementation.
 
-Make a benchmark of the performance difference between the pure Perl and
-compiled implementations of the cache.
+#### Stage 5: Include AXFR request in cache
 
-#### Stage 4: AXFR
+Replace the querying of AXFR requests to use trust_dns instead of ldns.
 
-At this stage we replace the querying of AXFR requests to use trust_dns instead
-of ldns.
-
+* Update Netbase to be able to cache AXFR requests in a clean way does not
+  interfere with the Zonemaster Engine analysis.
 * Update Zonemaster::Engine::Nameserver::axfr to use Netbase::Cache instead of
   Zonemaster::LDNS.
 
-This stage is not about performance and should not affect it much, but why not
-make a benchmark of it anyway?
+#### Stage 6: Cleaning up
 
-#### Stage 5: Cleaning up
+Make Zonemaster Engine independent of Zonemaster LDNS.
 
-At this stage we make Zonemaster Engine independent of Zonemaster LDNS.
+* Remove Zonemaster LDNS as a dependency from Zonemaster Engine.
 
-Remove Zonemaster LDNS as a dependency from Zonemaster Engine.
+#### Bonus stage: Concurrent queries
+
+Implement concurrent querying of multiple servers using the same question.
+
+* Update the Rust networking, cache and FFI layers to handle multiple servers
+  concurrently.
+* Update Zonemaster::Engine::Nameserver::query to take multiple server addresses
+  and return a hash mapping server addresses to responses. (Or maybe add this as
+  a new method?)
+* Update all callers of Zonemaster::Engine::Nameserver::query to submit all
+  servers in a single call.
+* Make a benchmark with concurrent queries.
 
 ## Status
 
