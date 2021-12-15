@@ -229,7 +229,7 @@ sub do_query {
 
     # Save cache
     if ( $opt_write ) {
-        write_file $opt_write, $cache->to_bytes();
+        write_file $opt_write, { binmode => ':raw' }, $cache->to_bytes();
     }
 
     return;
@@ -303,7 +303,7 @@ sub do_dump {
 sub init_cache {
     my ( $file ) = @_;
     if ( $file ) {
-        my $contents = read_file( $file );
+        my $contents = read_file( $file, { binmode => ':raw' } );
         return Netbase::Cache->from_bytes( $contents );
     }
     else {
