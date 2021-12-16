@@ -10,16 +10,28 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
+use trust_dns_client::client::AsyncClientConnect;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
+use trust_dns_client::udp::UdpClientStream;
 use trust_dns_proto::error::ProtoError;
 use trust_dns_proto::error::ProtoErrorKind;
+use trust_dns_proto::udp::UdpClientConnect;
 use trust_dns_proto::xfer::DnsRequest;
 use trust_dns_proto::xfer::DnsResponse;
+
+use tokio::net::TcpStream;
+use trust_dns_client::rr::dnssec::Signer;
+use trust_dns_client::tcp::TcpClientStream;
+use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
+use trust_dns_proto::tcp::TcpClientConnect;
+use trust_dns_proto::xfer::DnsMultiplexer;
+use trust_dns_proto::xfer::DnsMultiplexerConnect;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum Protocol {
@@ -202,8 +214,10 @@ impl Cache {
                     .or_insert_with(HashMap::new)
                     .entry(server)
                     .or_insert_with(|| {
+                        let runtime = Runtime::new().unwrap();
+                        let _guard = runtime.enter();
                         let (failures, query_time, query_duration, bytes) =
-                            net.lookup(question, server);
+                            net.lookup(&runtime, question, server);
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
@@ -310,24 +324,33 @@ pub struct Net {
 impl Net {
     pub fn lookup(
         &self,
+        runtime: &Runtime,
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
         let address = SocketAddr::new(server, 53);
         let timeout = Duration::from_millis(self.timeout as u64);
         let retrans = Duration::from_millis(self.retrans as u64);
-        let runtime = Runtime::new().unwrap();
-        let mut client: AsyncClient = match question.proto {
-            Protocol::UDP => Self::new_udp_client(&runtime, address, timeout),
-            Protocol::TCP => Self::new_tcp_client(&runtime, address, timeout),
+        let (failures, outcome, query_start, query_duration) = {
+            let fut = async {
+                let mut client = match question.proto {
+                    Protocol::UDP => Self::new_udp_client(address, timeout)
+                        .await
+                        .map(|(client, bg)| {
+                            runtime.spawn(bg);
+                            client
+                        }),
+                    Protocol::TCP => Self::new_tcp_client(address, timeout)
+                        .await
+                        .map(|(client, bg)| {
+                            runtime.spawn(bg);
+                            client
+                        }),
+                }.expect("connection failed");
+                Self::query_retry(&mut client, &question, self.retry, retrans).await
+            };
+            runtime.block_on(fut)
         };
-        let _guard = runtime.enter();
-        let (failures, outcome, query_start, query_duration) = runtime.block_on(Self::query_retry(
-            &mut client,
-            &question,
-            self.retry,
-            retrans,
-        ));
 
         let bytes =
             outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
@@ -383,26 +406,26 @@ impl Net {
         (outcome, started as u64, duration as u32)
     }
 
-    fn new_udp_client(runtime: &Runtime, address: SocketAddr, timeout: Duration) -> AsyncClient {
-        use tokio::net::UdpSocket;
-        use trust_dns_client::udp::UdpClientStream;
-
+    fn new_udp_client(
+        address: SocketAddr,
+        timeout: Duration,
+    ) -> AsyncClientConnect<UdpClientConnect<tokio::net::UdpSocket>, UdpClientStream<UdpSocket>>
+    {
         let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
-        let client = AsyncClient::connect(stream);
-        let (client, bg) = runtime.block_on(client).expect("connection failed");
-        runtime.spawn(bg);
-        client
+        AsyncClient::connect(stream)
     }
 
-    fn new_tcp_client(runtime: &Runtime, address: SocketAddr, timeout: Duration) -> AsyncClient {
-        use tokio::net::TcpStream;
-        use trust_dns_client::rr::dnssec::Signer;
-        use trust_dns_client::tcp::TcpClientStream;
-        use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
-        use trust_dns_proto::tcp::TcpClientConnect;
-        use trust_dns_proto::xfer::DnsMultiplexer;
-        use trust_dns_proto::xfer::DnsMultiplexerConnect;
-
+    fn new_tcp_client(
+        address: SocketAddr,
+        timeout: Duration,
+    ) -> AsyncClientConnect<
+        DnsMultiplexerConnect<
+            TcpClientConnect<AsyncIoTokioAsStd<tokio::net::TcpStream>>,
+            TcpClientStream<AsyncIoTokioAsStd<tokio::net::TcpStream>>,
+            Signer,
+        >,
+        DnsMultiplexer<TcpClientStream<AsyncIoTokioAsStd<tokio::net::TcpStream>>, Signer>,
+    > {
         let (tcp_client_stream, handle) =
             TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(address, timeout);
         let stream: DnsMultiplexerConnect<
@@ -410,9 +433,6 @@ impl Net {
             TcpClientStream<AsyncIoTokioAsStd<TcpStream>>,
             Signer,
         > = DnsMultiplexer::new(tcp_client_stream, handle, None);
-        let client = AsyncClient::connect(stream);
-        let (client, bg) = runtime.block_on(client).expect("connection failed");
-        runtime.spawn(bg);
-        client
+        AsyncClient::connect(stream)
     }
 }
