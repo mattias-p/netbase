@@ -257,31 +257,27 @@ $ffi->attach(
     lookup => [ 'cache_t', 'opaque', 'question_t', '(u64,u32,u16,u16,opaque,opaque)->void', 'opaque[]', 'usize' ],
     sub {
         my ( $xsub, $cache, $client, $question, @ips ) = @_;
-        my $start    = 0;
-        my $duration = 0;
-        my $msg_size = 0;
-        my $err_kind = 0;
-        my $message  = undef;
-        my $ip;
+        my %results;
         my $closure = $ffi->closure(
             sub {
-                ( $start, $duration, $msg_size, $err_kind, $message, $ip ) = @_;
+                my ( $start, $duration, $msg_size, $err_kind, $message, $ip ) = @_;
                 $ip = $ffi->cast( 'opaque' => 'ip_t', $ip );
                 if ( defined $message ) {
                     $message = $ffi->cast( 'opaque' => 'message_t', $message );
                 }
+                if ( $err_kind ) {
+                    $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
+                }
+                $results{$ip} = [$start, $duration, $msg_size, $err_kind, $message];
             }
         );
         if ( defined $client ) {
             $client = $ffi->cast( 'net_t' => 'opaque', $client );
         }
-        if ( $err_kind ) {
-            $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
-        }
         my @ip_ptrs = map { $ffi->cast( 'ip_t' => 'opaque', $_ ) } @ips;
         $xsub->( $cache, $client, $question, $closure, \@ip_ptrs, scalar @ips );
 
-        return { $ip => [ $start, $duration, $msg_size, $err_kind, $message ] };
+        return \%results;
     }
 );
 $ffi->attach(

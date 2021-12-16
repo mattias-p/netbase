@@ -91,9 +91,12 @@ pub extern "C" fn netbase_cache_lookup(
         Some(net)
     };
 
-    let server = servers[0];
-    let server_out = Box::into_raw(Box::new(*server)) as *mut CIpAddr;
-    if let Some((start, duration, res)) = cache.lookup(net, question.clone(), *server) {
+    for (server_out, (start, duration, res)) in cache.lookup(
+        net,
+        question.clone(),
+        servers.into_iter().map(|server| **server).collect(),
+    ) {
+        let server_out = Box::into_raw(Box::new(server_out)) as *mut CIpAddr;
         match res {
             Ok((message, size)) => {
                 let kind = 0;

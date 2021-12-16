@@ -264,14 +264,16 @@ Implement concurrent querying of multiple servers using the same question.
 * Configurable timeout waiting for requests.
 * Retrying failed requests with a delay in between tries.
 * Configurable qname, qtype and RD flag in requests.
-* Configurable EDNS header and fields. EDNS version and DO flag are complete. Option code
-  support is sufficient for Zonemaster.
+* Configurable EDNS header and fields. EDNS version and DO flag are complete.
+  Option code support is sufficient for Zonemaster.
 * Saving and loading cache files.
 * Making lookups against the cache only. (I.e. without making network requests.)
 * Usage documenation for all implemented features in the CLI tool.
 * Listing all requests in a cache file.
 * Dumping the complete contents of a cache file.
 * Dig-like output from CLI tool. (Incl. all record types and OPT pseudo section.)
+* Lookups to multiple servers with identical requests can be made in a single
+  call. (We could rip it out to make fairer benchmarks.)
 
 ### ToDo
 
@@ -302,10 +304,6 @@ Implement concurrent querying of multiple servers using the same question.
 * Revisit all parts of the Rust code and add unit tests for everything.
 
 #### Future work
-* Update the FFI to accommodate making lookups to multiple servers with
-  identical requests in a single call.
-  (I've got some code to perform such lookups in parallel.
-  The only part missing is getting the results across the FFI jump.)
 * Reusing TCP connections.
 * Add a query parameter to delete all records from the answer, authority and
   additional sections. (To be used with AXFR requests.)

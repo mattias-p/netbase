@@ -147,12 +147,10 @@ sub do_query {
     $edns_opt_code //= 0;
 
     # Parse qname, qtype and server
-    my $opt_ns;
+    my @opt_nss;
     for my $arg ( @args ) {
         if ( $arg =~ /^@/ ) {
-            usage_err( "Multiple server addresses given", "query" )
-              if defined $opt_ns;
-            $opt_ns = $arg;
+            push @opt_nss, $arg;
         }
         elsif ( rrtype( $arg ) ) {
             usage_err( "Multiple qtype values given", "query" )
@@ -177,9 +175,11 @@ sub do_query {
         $opt_qtype // usage_err( "No qtype given", "query" )    #
     ) // usage_err( "Invalid qtype given", "query" );
 
-    my $ns = parse_ns(
-        $opt_ns // usage_err( "No server given", "query" )    #
-    ) // usage_err( "Invalid name server address given", "query" );
+    my @nss = map {
+        parse_ns(
+            $_ // usage_err( "No server given", "query" )    #
+        ) // usage_err( "Invalid name server address given", "query" )
+    } @opt_nss;
 
     # Construct question
     my $question = question(
@@ -213,7 +213,7 @@ sub do_query {
 
     # Perform lookup
     my @queries;
-    my $outcomes = $cache->lookup( $net, $question, $ns );
+    my $outcomes = $cache->lookup( $net, $question, @nss );
     for my $outcome_ns ( keys %{ $outcomes } ) {
         my ( $start, $duration, $msg_size, $err_kind, $message ) = @{ $outcomes->{$outcome_ns} };
         $outcome_ns = ip( $outcome_ns );
@@ -459,7 +459,7 @@ Perform a single lookup.
 
 =head2 USAGE
 
-netbase query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER [query and config options]
+netbase query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER... [query and config options]
 
 =head2 MODE OPTIONS
 

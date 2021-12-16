@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -193,69 +194,89 @@ impl Cache {
         &mut self,
         net: Option<Rc<Net>>,
         question: Question,
-        server: IpAddr,
-    ) -> Option<(u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
-        use std::collections::hash_map::Entry;
+        servers: HashSet<IpAddr>,
+    ) -> HashMap<IpAddr, (u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
+        use futures_util::future::FutureExt;
+        use futures::future;
+
+        let mut results = Vec::new();
         match net {
-            None => self
-                .cache
-                .get(&question)
-                .and_then(|inner| inner.get(&server))
-                .cloned(),
+            None => results.extend(servers.into_iter().filter_map(|server| {
+                self.cache
+                    .get(&question)
+                    .and_then(|inner| inner.get(&server))
+                    .cloned()
+                    .map(|response| (server, response))
+            })),
             Some(ref net) => {
-                if self.is_reading.get() {
-                    return Some((0, 0, Err(ErrorKind::Lock)));
-                }
                 let question_bucket = self
                     .cache
                     .entry(question.clone())
                     .or_insert_with(HashMap::new);
                 let runtime = Runtime::new().unwrap();
-                let _guard = runtime.enter();
-                let response = match question_bucket.entry(server) {
-                    Entry::Vacant(vacant) => {
-                        let (failures, started, duration, bytes) =
-                            runtime.block_on(net.lookup(&runtime, question, server));
-                        let outcome = match bytes {
-                            Ok(bytes) => {
-                                let (message, parse_err) = MyMessage::from_vec(bytes);
-                                if let Some(parse_err) = parse_err {
-                                    Self::perror(started, &parse_err);
-                                }
-                                Ok(message)
-                            }
-                            Err(lookup_err) => {
-                                Self::perror(started, &lookup_err);
-                                Err((&lookup_err).into())
-                            }
-                        };
-                        vacant
-                            .insert(Rc::new(Response {
-                                failures,
-                                started,
-                                duration,
-                                outcome,
-                            }))
-                            .clone()
+                let mut queries = Vec::new();
+                for server in servers {
+                    if self.is_reading.get() {
+                        return [(server, (0, 0, Err(ErrorKind::Lock)))].into();
                     }
-                    Entry::Occupied(occupied) => occupied.get().clone(),
-                };
-                Some(response)
+                    if let Some(response) = question_bucket.get(&server) {
+                        results.push((server, response.clone()));
+                    } else {
+                        queries.push(net.lookup(&runtime, question.clone(), server).map(
+                            move |(failures, started, duration, bytes)| {
+                                let outcome = match bytes {
+                                    Ok(bytes) => {
+                                        let (message, parse_err) = MyMessage::from_vec(bytes);
+                                        if let Some(parse_err) = parse_err {
+                                            Self::perror(started, &parse_err);
+                                        }
+                                        Ok(message)
+                                    }
+                                    Err(lookup_err) => {
+                                        Self::perror(started, &lookup_err);
+                                        Err((&lookup_err).into())
+                                    }
+                                };
+                                let response = Rc::new(Response {
+                                    failures,
+                                    started,
+                                    duration,
+                                    outcome,
+                                });
+                                (server, response)
+                            },
+                        ));
+                    }
+                }
+                let _guard = runtime.enter();
+                let responses = runtime.block_on(future::join_all(queries));
+                for (server, response) in responses {
+                    question_bucket.insert(server, response.clone());
+                    results.push((server, response));
+                }
             }
-        }
-        .map(|response| {
-            (
-                response.started,
-                response.duration,
-                match &response.outcome {
-                    Ok(mymessage) => match mymessage.decoded {
-                        Some(ref message) => Ok((message.clone(), mymessage.encoded.len() as u16)),
-                        None => Err(ErrorKind::Protocol),
-                    },
-                    Err(error_kind) => Err(error_kind.clone()),
-                },
-            )
-        })
+        };
+        results
+            .into_iter()
+            .map(|(server, response)| {
+                (
+                    server,
+                    (
+                        response.started,
+                        response.duration,
+                        match &response.outcome {
+                            Ok(mymessage) => match mymessage.decoded {
+                                Some(ref message) => {
+                                    Ok((message.clone(), mymessage.encoded.len() as u16))
+                                }
+                                None => Err(ErrorKind::Protocol),
+                            },
+                            Err(error_kind) => Err(error_kind.clone()),
+                        },
+                    ),
+                )
+            })
+            .collect()
     }
 
     pub fn to_vec(&self) -> Vec<u8> {
