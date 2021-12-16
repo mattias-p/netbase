@@ -99,8 +99,10 @@ impl From<Question> for DnsRequest {
             edns.set_version(edns_config.version);
             edns.set_dnssec_ok(edns_config.dnssec_ok);
             if edns_config.option_code != 0 {
-                edns.options_mut()
-                    .insert(EdnsOption::Unknown(edns_config.option_code, edns_config.option_value));
+                edns.options_mut().insert(EdnsOption::Unknown(
+                    edns_config.option_code,
+                    edns_config.option_value,
+                ));
             }
         }
 
@@ -183,11 +185,7 @@ impl Cache {
         net: Option<Rc<Net>>,
         question: Question,
         server: IpAddr,
-    ) -> Option<(
-        u64,
-        u32,
-        Result<(Rc<Message>, u16), ErrorKind>,
-    )> {
+    ) -> Option<(u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
         match net {
             None => self
                 .cache
@@ -286,7 +284,12 @@ impl Cache {
     fn perror<E: fmt::Debug>(query_time: u64, error: &E) {
         use chrono::TimeZone;
         use chrono::Utc;
-        eprintln!("{} netbase: {:?}", Utc.timestamp_millis(query_time as i64).format("%F %H:%M:%S%.3f"), error);
+        eprintln!(
+            "{} netbase: {:?}",
+            Utc.timestamp_millis(query_time as i64)
+                .format("%F %H:%M:%S%.3f"),
+            error
+        );
     }
 }
 
@@ -319,7 +322,12 @@ impl Net {
             Protocol::TCP => Self::new_tcp_client(&runtime, address, timeout),
         };
         let _guard = runtime.enter();
-        let (failures, outcome, query_start, query_duration) = runtime.block_on(Self::query_retry(&mut client, &question, self.retry, retrans));
+        let (failures, outcome, query_start, query_duration) = runtime.block_on(Self::query_retry(
+            &mut client,
+            &question,
+            self.retry,
+            retrans,
+        ));
 
         let bytes =
             outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
@@ -327,7 +335,12 @@ impl Net {
         (failures, query_start, query_duration, bytes)
     }
 
-    async fn query_retry(client: &mut AsyncClient, question: &Question, tries: u16, retrans: Duration) -> (Vec<Failure>, Result<DnsResponse, ProtoError>, u64, u32) {
+    async fn query_retry(
+        client: &mut AsyncClient,
+        question: &Question,
+        tries: u16,
+        retrans: Duration,
+    ) -> (Vec<Failure>, Result<DnsResponse, ProtoError>, u64, u32) {
         use tokio::time;
 
         let mut failures = Vec::new();
@@ -357,7 +370,7 @@ impl Net {
 
     async fn query(
         client: &mut AsyncClient,
-        question: Question
+        question: Question,
     ) -> (Result<DnsResponse, ProtoError>, u64, u32) {
         use chrono::Utc;
         use trust_dns_proto::DnsHandle;
