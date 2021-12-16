@@ -180,7 +180,8 @@ pub extern "C" fn netbase_net_lookup(
 
     let runtime = Runtime::new().unwrap();
     let _guard = runtime.enter();
-    let (_, start, duration, res) = net.lookup(&runtime, question.clone(), server);
+    let (_, start, duration, res) =
+        runtime.block_on(net.lookup(&runtime, question.clone(), server));
     unsafe {
         *query_start = start;
     };

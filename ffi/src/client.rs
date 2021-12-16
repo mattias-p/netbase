@@ -13,7 +13,6 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
-use trust_dns_client::client::AsyncClientConnect;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
 use trust_dns_client::rr::Name;
@@ -21,7 +20,6 @@ use trust_dns_client::rr::RecordType;
 use trust_dns_client::udp::UdpClientStream;
 use trust_dns_proto::error::ProtoError;
 use trust_dns_proto::error::ProtoErrorKind;
-use trust_dns_proto::udp::UdpClientConnect;
 use trust_dns_proto::xfer::DnsRequest;
 use trust_dns_proto::xfer::DnsResponse;
 
@@ -29,7 +27,6 @@ use tokio::net::TcpStream;
 use trust_dns_client::rr::dnssec::Signer;
 use trust_dns_client::tcp::TcpClientStream;
 use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
-use trust_dns_proto::tcp::TcpClientConnect;
 use trust_dns_proto::xfer::DnsMultiplexer;
 use trust_dns_proto::xfer::DnsMultiplexerConnect;
 
@@ -171,9 +168,9 @@ impl fmt::Display for ErrorKind {
 struct Response {
     failures: Vec<Failure>,
     /// Millis since epoch
-    query_time: u64,
+    started: u64,
     /// Millis
-    query_duration: u32,
+    duration: u32,
     outcome: Result<MyMessage, ErrorKind>,
 }
 
@@ -198,6 +195,7 @@ impl Cache {
         question: Question,
         server: IpAddr,
     ) -> Option<(u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
+        use std::collections::hash_map::Entry;
         match net {
             None => self
                 .cache
@@ -208,44 +206,47 @@ impl Cache {
                 if self.is_reading.get() {
                     return Some((0, 0, Err(ErrorKind::Lock)));
                 }
-                let response = self
+                let question_bucket = self
                     .cache
                     .entry(question.clone())
-                    .or_insert_with(HashMap::new)
-                    .entry(server)
-                    .or_insert_with(|| {
-                        let runtime = Runtime::new().unwrap();
-                        let _guard = runtime.enter();
-                        let (failures, query_time, query_duration, bytes) =
-                            net.lookup(&runtime, question, server);
+                    .or_insert_with(HashMap::new);
+                let runtime = Runtime::new().unwrap();
+                let _guard = runtime.enter();
+                let response = match question_bucket.entry(server) {
+                    Entry::Vacant(vacant) => {
+                        let (failures, started, duration, bytes) =
+                            runtime.block_on(net.lookup(&runtime, question, server));
                         let outcome = match bytes {
                             Ok(bytes) => {
                                 let (message, parse_err) = MyMessage::from_vec(bytes);
                                 if let Some(parse_err) = parse_err {
-                                    Self::perror(query_time, &parse_err);
+                                    Self::perror(started, &parse_err);
                                 }
                                 Ok(message)
                             }
                             Err(lookup_err) => {
-                                Self::perror(query_time, &lookup_err);
+                                Self::perror(started, &lookup_err);
                                 Err((&lookup_err).into())
                             }
                         };
-                        Rc::new(Response {
-                            failures,
-                            query_time,
-                            query_duration,
-                            outcome,
-                        })
-                    })
-                    .clone();
+                        vacant
+                            .insert(Rc::new(Response {
+                                failures,
+                                started,
+                                duration,
+                                outcome,
+                            }))
+                            .clone()
+                    }
+                    Entry::Occupied(occupied) => occupied.get().clone(),
+                };
                 Some(response)
             }
         }
         .map(|response| {
             (
-                response.query_time,
-                response.query_duration,
+                response.started,
+                response.duration,
                 match &response.outcome {
                     Ok(mymessage) => match mymessage.decoded {
                         Some(ref message) => Ok((message.clone(), mymessage.encoded.len() as u16)),
@@ -295,12 +296,12 @@ impl Cache {
         self.is_reading.set(old_val);
     }
 
-    fn perror<E: fmt::Debug>(query_time: u64, error: &E) {
+    fn perror<E: fmt::Debug>(started: u64, error: &E) {
         use chrono::TimeZone;
         use chrono::Utc;
         eprintln!(
             "{} netbase: {:?}",
-            Utc.timestamp_millis(query_time as i64)
+            Utc.timestamp_millis(started as i64)
                 .format("%F %H:%M:%S%.3f"),
             error
         );
@@ -322,40 +323,32 @@ pub struct Net {
 }
 
 impl Net {
-    pub fn lookup(
+    pub async fn lookup(
         &self,
         runtime: &Runtime,
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
+        use chrono::Utc;
+
         let address = SocketAddr::new(server, 53);
         let timeout = Duration::from_millis(self.timeout as u64);
         let retrans = Duration::from_millis(self.retrans as u64);
-        let (failures, outcome, query_start, query_duration) = {
-            let fut = async {
-                let mut client = match question.proto {
-                    Protocol::UDP => Self::new_udp_client(address, timeout)
-                        .await
-                        .map(|(client, bg)| {
-                            runtime.spawn(bg);
-                            client
-                        }),
-                    Protocol::TCP => Self::new_tcp_client(address, timeout)
-                        .await
-                        .map(|(client, bg)| {
-                            runtime.spawn(bg);
-                            client
-                        }),
-                }.expect("connection failed");
-                Self::query_retry(&mut client, &question, self.retry, retrans).await
-            };
-            runtime.block_on(fut)
-        };
-
-        let bytes =
-            outcome.map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
-
-        (failures, query_start, query_duration, bytes)
+        let conn_start = Utc::now().timestamp_millis();
+        match Self::connect(&runtime, question.proto, address, timeout).await {
+            Ok(mut conn) => {
+                let (failures, outcome, query_start, query_duration) =
+                    Self::query_retry(&mut conn, &question, self.retry, retrans).await;
+                let bytes = outcome
+                    .map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+                (failures, query_start, query_duration, bytes)
+            }
+            Err(err) => {
+                let finished = Utc::now().timestamp_millis();
+                let duration = finished - conn_start;
+                (vec![], conn_start as u64, duration as u32, Err(err))
+            }
+        }
     }
 
     async fn query_retry(
@@ -406,33 +399,42 @@ impl Net {
         (outcome, started as u64, duration as u32)
     }
 
-    fn new_udp_client(
+    async fn connect(
+        runtime: &Runtime,
+        proto: Protocol,
         address: SocketAddr,
         timeout: Duration,
-    ) -> AsyncClientConnect<UdpClientConnect<tokio::net::UdpSocket>, UdpClientStream<UdpSocket>>
-    {
-        let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
-        AsyncClient::connect(stream)
+    ) -> Result<AsyncClient, ProtoError> {
+        match proto {
+            Protocol::UDP => Self::connect_udp(&runtime, address, timeout).await,
+            Protocol::TCP => Self::connect_tcp(&runtime, address, timeout).await,
+        }
     }
 
-    fn new_tcp_client(
+    async fn connect_udp(
+        runtime: &Runtime,
         address: SocketAddr,
         timeout: Duration,
-    ) -> AsyncClientConnect<
-        DnsMultiplexerConnect<
-            TcpClientConnect<AsyncIoTokioAsStd<tokio::net::TcpStream>>,
-            TcpClientStream<AsyncIoTokioAsStd<tokio::net::TcpStream>>,
-            Signer,
-        >,
-        DnsMultiplexer<TcpClientStream<AsyncIoTokioAsStd<tokio::net::TcpStream>>, Signer>,
-    > {
+    ) -> Result<AsyncClient, ProtoError> {
+        let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
+        AsyncClient::connect(stream).await.map(|(conn, bg)| {
+            runtime.spawn(bg);
+            conn
+        })
+    }
+
+    async fn connect_tcp(
+        runtime: &Runtime,
+        address: SocketAddr,
+        timeout: Duration,
+    ) -> Result<AsyncClient, ProtoError> {
         let (tcp_client_stream, handle) =
             TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(address, timeout);
-        let stream: DnsMultiplexerConnect<
-            TcpClientConnect<AsyncIoTokioAsStd<TcpStream>>,
-            TcpClientStream<AsyncIoTokioAsStd<TcpStream>>,
-            Signer,
-        > = DnsMultiplexer::new(tcp_client_stream, handle, None);
-        AsyncClient::connect(stream)
+        let stream: DnsMultiplexerConnect<_, _, Signer> =
+            DnsMultiplexer::new(tcp_client_stream, handle, None);
+        AsyncClient::connect(stream).await.map(|(conn, bg)| {
+            runtime.spawn(bg);
+            conn
+        })
     }
 }
