@@ -203,7 +203,7 @@ sub do_query {
 
     # Initialize networking
     my $net;
-    if ( defined $opt_create || defined $opt_update || $opt_force ) {
+    if ( !defined $opt_read || $opt_force ) {
         $net = Netbase::Net->new(
             timeout => $opt_timeout,
             retry   => $opt_retry,
