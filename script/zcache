@@ -53,7 +53,9 @@ sub main {
     usage_err( "No subcommand given" )
       if !defined $cmd_sub;
 
-    $cmd_sub->( @args );
+    eval { $cmd_sub->( @args ) };
+    die "zcache: error: $@"
+      if $@;
 
     return;
 }
