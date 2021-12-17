@@ -6,7 +6,12 @@ use Const::Fast;
 use DateTime;
 use File::Slurp qw( read_file write_file );
 use Getopt::Long qw( GetOptionsFromArray );
-use Netbase qw( ip proto name question rrtype :proto );
+use Netbase qw( proto rrtype );
+use Netbase::Cache;
+use Netbase::IP qw( ip );
+use Netbase::Name qw( name );
+use Netbase::Net;
+use Netbase::Question qw( question );
 use Pod::Usage qw( pod2usage );
 
 const my %ALL_SUBCOMMANDS => (
@@ -93,7 +98,7 @@ sub do_query {
       if $opt_retrans < 0 || $opt_retrans > 1000;
 
     # Parse request options
-    my $opt_proto   = $PROTO_UDP;
+    my $opt_proto   = $Netbase::PROTO_UDP;
     my $opt_recurse = 0;
     my $opt_dnssec;
     my $opt_edns_version;
@@ -104,8 +109,8 @@ sub do_query {
     );
     GetOptionsFromArray(
         \@args,
-        'udp+'       => sub { $opt_proto = $PROTO_UDP },
-        'tcp+'       => sub { $opt_proto = $PROTO_TCP },
+        'udp+'       => sub { $opt_proto = $Netbase::PROTO_UDP },
+        'tcp+'       => sub { $opt_proto = $Netbase::PROTO_TCP },
         'recurse!'   => \$opt_recurse,
         'noedns+'    => sub { $opt_edns_version = undef },
         'edns=i'     => \$opt_edns_version,
@@ -355,7 +360,7 @@ sub show_outcome {
     my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
     if ( $message ) {
         print ";; Got answer:\n";
-        print $message;
+        print $message->to_string;
         print "\n";
         printf ";; Response size: %s bytes\n", $msg_size;
     }

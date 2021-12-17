@@ -1,4 +1,7 @@
 package Netbase;
+use strict;
+use warnings;
+use utf8;
 
 use strict;
 use warnings;
@@ -9,34 +12,20 @@ our $VERSION = '0.01';
 use Const::Fast;
 use Exporter qw( import );
 use FFI::Platypus 1.00;
-use Scalar::Util qw( blessed dualvar isdual looks_like_number );
+use Scalar::Util qw( dualvar isdual looks_like_number );
 
 our @EXPORT_OK = qw(
-  ip
-  name
   proto
-  question
   rrtype
-);
-our %EXPORT_TAGS = (
-    helpers => [
-        qw(
-          ip
-          name
-          proto
-          question
-          rrtype
-        )
-    ],
 );
 
 my %NAME2RRTYPE;
 my %NUM2RRTYPE;
-my %NUM2ERROR;
+our %NUM2ERROR;
 my %NAME2PROTO;
 my %NUM2PROTO;
 
-my $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
+our $ffi = FFI::Platypus->new( api => 1, lang => 'Rust' );
 
 $ffi->load_custom_type( '::PointerSizeBuffer' => 'buffer' );
 
@@ -48,6 +37,12 @@ $ffi->type( 'object(Netbase::Question)' => 'question_t' );
 $ffi->type( 'object(Netbase::Message)'  => 'message_t' );
 $ffi->type( 'u16'                       => 'rrtype_t' );
 $ffi->type( 'u8'                        => 'proto_t' );
+
+$ffi->attach_cast( 'ip_to_opaque',       'ip_t',   'opaque' );
+$ffi->attach_cast( 'net_to_opaque',      'net_t',  'opaque' );
+$ffi->attach_cast( 'opaque_to_ip',       'opaque', 'ip_t' );
+$ffi->attach_cast( 'opaque_to_message',  'opaque', 'message_t' );
+$ffi->attach_cast( 'opaque_to_question', 'opaque', 'question_t' );
 
 $ffi->bundle;
 
@@ -103,7 +98,6 @@ const our $PROTO_TCP => dualvar 2, "TCP";
         $NAME2PROTO{"$proto"} = $proto;
         my $name = "\$PROTO_$proto";
         push @EXPORT_OK, $name;
-        push @{ $EXPORT_TAGS{proto} }, $name;
     }
 
     my @all_errors = (    #
@@ -113,10 +107,9 @@ const our $PROTO_TCP => dualvar 2, "TCP";
         $E_TIMEOUT,
     );
     for my $error ( @all_errors ) {
-        $NUM2ERROR{ 0 + $error } = $error;
-        my $name = $error =~ s/(.*)_ERROR/\$E_$1/m;
+        $NUM2ERROR{ 0 + $error } = "$error";
+        my $name = "$error" =~ s/(.*)_ERROR/\$E_$1/mr;
         push @EXPORT_OK, $name;
-        push @{ $EXPORT_TAGS{error} }, $name;
     }
 
     my @all_rrtypes = (    #
@@ -157,24 +150,7 @@ const our $PROTO_TCP => dualvar 2, "TCP";
         $NAME2RRTYPE{"$rrtype"} = $rrtype;
         $NUM2RRTYPE{ 0 + $rrtype } = $rrtype;
         push @EXPORT_OK, "\$RRTYPE_$rrtype";
-        push @{ $EXPORT_TAGS{rrtype} }, "\$RRTYPE_$rrtype";
     }
-
-    # add all the other ":class" tags to the ":all" class,
-    # deleting duplicates
-    {
-        my %seen;
-        push @{ $EXPORT_TAGS{all} }, grep { !$seen{$_}++ } @{ $EXPORT_TAGS{$_} } foreach keys %EXPORT_TAGS;
-    }
-}
-
-sub ip {
-    my $ip = shift;
-
-    if ( blessed $ip && $ip->isa( 'Netbase::IP' ) ) {
-        return $ip;
-    }
-    return Netbase::IP->new( $ip );
 }
 
 sub proto {
@@ -183,35 +159,13 @@ sub proto {
     if ( looks_like_number( $value ) && $value == "$value" && $value == int( $value ) && $value >= 0 && $value < 256 ) {
         return $NUM2PROTO{$value} // $value;
     }
-    elsif ( my $proto = $NAME2PROTO{ uc $value } ) {
+    elsif ( defined $value && ( my $proto = $NAME2PROTO{ uc $value } ) ) {
         if ( !isdual( $value ) || $value + 0 == 0 || $value + 0 == $proto ) {
             return $proto;
         }
     }
 
     return;
-}
-
-sub name {
-    my $name = shift;
-
-    if ( blessed $name && $name->isa( 'Netbase::Name' ) ) {
-        return $name;
-    }
-    return Netbase::Name->from_ascii( $name );
-}
-
-sub question {
-    my ( $qname, $qtype, $opts ) = @_;
-    $opts //= {};
-    my $proto             = $opts->{proto}             // $PROTO_UDP;
-    my $recursion_desired = $opts->{recursion_desired} // 0;
-
-    $qname = name( $qname )   // return;
-    $qtype = rrtype( $qtype ) // return;
-    $proto = proto( $proto )  // return;
-
-    return Netbase::Question->new( $qname, $qtype, $proto, $recursion_desired );
 }
 
 sub rrtype {
@@ -228,187 +182,5 @@ sub rrtype {
 
     return;
 }
-
-package Netbase::Cache;
-
-use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
-
-$ffi->mangler( sub { "netbase_cache_" . shift } );
-
-$ffi->attach( new        => ['string']             => 'cache_t' );
-$ffi->attach( from_bytes => [ 'string', 'buffer' ] => 'cache_t' );
-$ffi->attach(
-    to_bytes => [ 'cache_t', '(usize)->opaque' ],
-    sub {
-        my ( $xsub, $cache ) = @_;
-        my $buffer  = "";
-        my $closure = $ffi->closure(
-            sub {
-                my ( $size ) = @_;
-                grow( $buffer, $size );
-                return scalar_to_pointer $buffer;
-            }
-        );
-        $xsub->( $cache, $closure );
-        return $buffer;
-    }
-);
-$ffi->attach(
-    lookup => [ 'cache_t', 'opaque', 'question_t', '(u64,u32,u16,u16,opaque,opaque)->void', 'opaque[]', 'usize' ],
-    sub {
-        my ( $xsub, $cache, $client, $question, @ips ) = @_;
-        my %results;
-        my $closure = $ffi->closure(
-            sub {
-                my ( $start, $duration, $msg_size, $err_kind, $message, $ip ) = @_;
-                $ip = $ffi->cast( 'opaque' => 'ip_t', $ip );
-                if ( defined $message ) {
-                    $message = $ffi->cast( 'opaque' => 'message_t', $message );
-                }
-                if ( $err_kind ) {
-                    $err_kind = $NUM2ERROR{$err_kind} // $E_INTERNAL;
-                }
-                $results{$ip} = [$start, $duration, $msg_size, $err_kind, $message];
-            }
-        );
-        if ( defined $client ) {
-            $client = $ffi->cast( 'net_t' => 'opaque', $client );
-        }
-        my @ip_ptrs = map { $ffi->cast( 'ip_t' => 'opaque', $_ ) } @ips;
-        $xsub->( $cache, $client, $question, $closure, \@ip_ptrs, scalar @ips );
-
-        return \%results;
-    }
-);
-$ffi->attach(
-    for_each_request => [ 'cache_t', '(opaque, opaque)->void' ],
-    sub {
-        my ( $xsub, $cache, $callback ) = @_;
-        my $closure = $ffi->closure(
-            sub {
-                my ( $ip, $question ) = @_;
-                $ip       = $ffi->cast( 'opaque' => 'ip_t',       $ip );
-                $question = $ffi->cast( 'opaque' => 'question_t', $question );
-                $callback->( $ip, $question );
-            }
-        );
-        $xsub->( $cache, $closure );
-        return;
-    }
-);
-$ffi->attach(
-    for_each_retry => [ 'cache_t', 'question_t', 'ip_t', '(u64, u32, u32)->void' ],
-    sub {
-        my ( $xsub, $cache, $question, $server, $callback ) = @_;
-        my $closure = $ffi->closure(
-            sub {
-                my ( $start, $duration, $error ) = @_;
-                $error = $NUM2ERROR{$error} // $E_INTERNAL;
-                $callback->( $start, $duration, $error );
-            }
-        );
-        $xsub->( $cache, $question, $server, $closure );
-        return;
-    }
-);
-$ffi->attach( DESTROY => ['cache_t'] );
-
-package Netbase::Net;
-
-use Carp qw( croak );
-use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
-
-$ffi->mangler( sub { "netbase_net_" . shift } );
-
-$ffi->attach(
-    new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t',
-    sub {
-        my ( $xsub, $class, %args ) = @_;
-        my $timeout = delete $args{timeout} // 30;
-        my $retry   = delete $args{retry}   // 3;
-        my $retrans = delete $args{retrans} // 1;
-        if ( %args ) {
-            croak "unrecognized arguments: " . join( ' ', sort keys %args );
-        }
-        $timeout = int( $timeout * 1000 );
-        $retrans = int( $retrans * 1000 );
-        return $xsub->( $class, $timeout, $retry, $retrans );
-    }
-);
-$ffi->attach(
-    lookup => [ 'net_t', 'question_t', 'ip_t', 'u64*', 'u32*', '(usize)->opaque' ] => 'u32',
-    sub {
-        my ( $xsub, $client, $question, $ip ) = @_;
-        my $query_start    = 0;
-        my $query_duration = 0;
-        my $buffer         = "";
-        my $closure        = $ffi->closure(
-            sub {
-                my ( $size ) = @_;
-                grow( $buffer, $size );
-                return scalar_to_pointer $buffer;
-            }
-        );
-
-        my $error = $xsub->( $client, $question, $ip, \$query_start, \$query_duration, $closure );
-        if ( $error ) {
-            die {
-                error          => $NUM2ERROR{$error} // $E_INTERNAL,
-                query_start    => $query_start,
-                query_duration => $query_duration,
-            };
-        }
-        else {
-            return $buffer, $query_start, $query_duration;
-        }
-    }
-);
-$ffi->attach( DESTROY => ['net_t'] );
-
-package Netbase::IP;
-
-$ffi->mangler( sub { "netbase_ip_" . shift } );
-
-$ffi->attach( new       => [ 'string', 'string' ] => 'ip_t' );
-$ffi->attach( to_string => ['ip_t']               => 'string' );
-$ffi->attach( DESTROY   => ['ip_t'] );
-
-use overload '""' => \&to_string;
-
-package Netbase::Name;
-
-$ffi->mangler( sub { "netbase_name_" . shift } );
-
-$ffi->attach( from_ascii => [ 'string', 'string' ] => 'name_t' );
-$ffi->attach( to_string  => ['name_t']             => 'string' );
-$ffi->attach( DESTROY    => ['name_t'] );
-
-use overload '""' => \&to_string;
-
-package Netbase::Question;
-
-$ffi->mangler( sub { "netbase_question_" . shift } );
-
-$ffi->attach( new => [ 'string', 'name_t', 'rrtype_t', 'proto_t', 'u8' ] => 'question_t' );
-$ffi->attach(
-    set_edns => [ 'question_t', 'u8', 'u8', 'u16', 'u8[]', 'usize' ],
-    sub {
-        my ( $xsub, $this, $version, $dnssec_ok, $option_code, $option_value ) = @_;
-        $xsub->( $this, $version, $dnssec_ok, $option_code, $option_value, length $option_value );
-    }
-);
-$ffi->attach( to_string => ['question_t'] => 'string' );
-$ffi->attach( DESTROY   => ['question_t'] );
-
-use overload '""' => \&to_string;
-
-package Netbase::Message;
-
-$ffi->mangler( sub { "netbase_message_" . shift } );
-
-$ffi->attach( to_string => ['message_t'] => 'string' );
-$ffi->attach( DESTROY   => ['message_t'] );
-
-use overload '""' => \&to_string;
 
 1;

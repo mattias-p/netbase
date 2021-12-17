@@ -1,7 +1,12 @@
 use Test2::V0;
 use Test2::Tools::Class;
 
-use Netbase qw( ip name proto question rrtype $RRTYPE_A $RRTYPE_AAAA $RRTYPE_NS $RRTYPE_SOA );
+use Netbase qw( proto rrtype $RRTYPE_A $RRTYPE_AAAA $RRTYPE_NS $RRTYPE_SOA );
+use Netbase::Cache;
+use Netbase::IP qw( ip );
+use Netbase::Name qw( name );
+use Netbase::Net;
+use Netbase::Question qw( question );
 use Scalar::Util qw( dualvar );
 
 subtest 'Netbase' => sub {

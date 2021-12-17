@@ -11,26 +11,25 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::net::UdpSocket;
 use tokio::runtime::Handle;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
+use trust_dns_client::rr::dnssec::Signer;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
+use trust_dns_client::tcp::TcpClientStream;
 use trust_dns_client::udp::UdpClientStream;
 use trust_dns_proto::error::ProtoError;
 use trust_dns_proto::error::ProtoErrorKind;
-use trust_dns_proto::xfer::DnsRequest;
-use trust_dns_proto::xfer::DnsResponse;
-
-use tokio::net::TcpStream;
-use trust_dns_client::rr::dnssec::Signer;
-use trust_dns_client::tcp::TcpClientStream;
 use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
 use trust_dns_proto::xfer::DnsMultiplexer;
 use trust_dns_proto::xfer::DnsMultiplexerConnect;
+use trust_dns_proto::xfer::DnsRequest;
+use trust_dns_proto::xfer::DnsResponse;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum Protocol {
