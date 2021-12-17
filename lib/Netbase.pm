@@ -105,9 +105,10 @@ const our $PROTO_TCP => dualvar 2, "TCP";
         $E_PROTOCOL,
         $E_IO,
         $E_TIMEOUT,
+        $E_LOCK,
     );
     for my $error ( @all_errors ) {
-        $NUM2ERROR{ 0 + $error } = "$error";
+        $NUM2ERROR{ 0 + $error } = $error;
         my $name = "$error" =~ s/(.*)_ERROR/\$E_$1/mr;
         push @EXPORT_OK, $name;
     }

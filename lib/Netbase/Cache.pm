@@ -147,14 +147,14 @@ Look up responses to a question from a set of server addresses.
 =cut
 
 $Netbase::ffi->attach(
-    lookup => [ 'cache_t', 'opaque', 'question_t', '(u64,u32,u16,u16,opaque,opaque)->void', 'opaque[]', 'usize' ] => 'u8',
+    lookup => [ 'cache_t', 'opaque', 'question_t', 'opaque[]', 'usize', '(opaque,u64,u32,u16,u16,opaque)->void' ] => 'u8',
     sub {
         my ( $xsub, $cache, $client, $question, @ips ) = @_;
 
         my %results;
         my $closure = $Netbase::ffi->closure(
             sub {
-                my ( $start, $duration, $msg_size, $err_kind, $message, $ip ) = @_;
+                my ( $ip, $start, $duration, $err_kind, $msg_size, $message ) = @_;
                 $ip = Netbase::opaque_to_ip $ip;
                 if ( defined $message ) {
                     $message = Netbase::opaque_to_message $message;
@@ -172,7 +172,7 @@ $Netbase::ffi->attach(
 
         my @ip_ptrs = map { Netbase::ip_to_opaque $_ } @ips;
 
-        $xsub->( $cache, $client, $question, $closure, \@ip_ptrs, scalar @ips )
+        $xsub->( $cache, $client, $question, \@ip_ptrs, scalar @ips, $closure )
           or croak "panic in foreign code\n";
 
         return \%results;
@@ -198,10 +198,10 @@ $Netbase::ffi->attach(
 
         my $closure = $Netbase::ffi->closure(
             sub {
-                my ( $ip, $question ) = @_;
-                $ip       = Netbase::opaque_to_ip $ip;
+                my ( $question, $ip ) = @_;
                 $question = Netbase::opaque_to_question $question;
-                $callback->( $ip, $question );
+                $ip       = Netbase::opaque_to_ip $ip;
+                $callback->( $question, $ip );
             }
         );
 

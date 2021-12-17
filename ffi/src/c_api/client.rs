@@ -92,19 +92,44 @@ pub extern "C" fn netbase_cache_to_bytes(
     .is_ok() as u8
 }
 
+/// Looks up responses to a question from a set of server addresses
+///
+/// # Arguments
+/// * `net` - An optional net instance to be used as a fallback for cache misses
+/// * `question` - The question to send to all the servers
+/// * `servers` - A pointer to an array of IpAddr pointers
+/// * `servers_len` - The length of the array
+/// * `handle_outcome` - A callback to be called with an outcome for each server. It's arguments
+///   are:
+///   * `server` - The subject of this call
+///   * `started` - The time the query was sent (or when the connection was attempted in case
+///     `error_kind` indicates a connection error) (milliseconds since the Unix epoch)
+///   * `duration` - How long before the request was completed or timed out
+///   * `error_kind` - The kind error that occurred or zero for no error
+///   * `packet_size` - The size in bytes of the received DNS packet or zero if no packet was
+///     received
+///   * `message` - The received response or null if no response was received
+///
+/// # Errors
+/// * If a zero value is returned this means that a panic was caught and the function returned
+///   abnormally.
+///
+/// A call to `handle_outcome` with a `error_kind` set to zero and `message` set to null means the
+/// request is not in the cache and no net instance was provided as a fallback.
 #[no_mangle]
 pub extern "C" fn netbase_cache_lookup(
     cache: *mut CCache,
     net: *const CNet,
     question: *const CQuestion,
-    handle_outcome: extern "C" fn(u64, u32, u16, u16, *mut CMessage, *mut CIpAddr),
-    server_p: *const *const CIpAddr,
-    server_len: usize,
+    servers: *const *const CIpAddr,
+    servers_len: usize,
+    handle_outcome: extern "C" fn(*mut CIpAddr, u64, u32, u16, u16, *mut CMessage),
 ) -> u8 {
     panic::catch_unwind(|| {
         let cache = unsafe { &mut *(cache as *mut Cache) };
-        let servers = ptr::slice_from_raw_parts(server_p as *const &IpAddr, server_len);
+        let servers = ptr::slice_from_raw_parts(servers as *const &IpAddr, servers_len);
         let servers = unsafe { &*servers };
+        let mut servers = servers.iter().map(|server| **server).collect();
         let question = unsafe { &*(question as *const Question) };
         let net = if net.is_null() {
             None
@@ -117,59 +142,76 @@ pub extern "C" fn netbase_cache_lookup(
             Some(net)
         };
 
-        let mut servers = servers.iter().map(|server| **server).collect();
         let results = cache.lookup(net, question.clone(), &servers);
+
         for (server, response) in results {
             servers.remove(&server);
             let server = Box::into_raw(Box::new(server)) as *mut CIpAddr;
             match response.outcome {
-                Ok((message, size)) => {
-                    let kind = 0;
+                Ok((message, packet_size)) => {
+                    let err_kind = 0;
                     let message = Rc::into_raw(message) as *mut CMessage;
                     handle_outcome(
+                        server,
                         response.started,
                         response.duration,
-                        size,
-                        kind,
+                        err_kind,
+                        packet_size,
                         message,
-                        server,
                     );
                 }
-                Err(kind) => {
-                    let size = 0;
-                    let kind: u16 = kind.into();
+                Err(err_kind) => {
+                    let packet_size = 0;
+                    let err_kind: u16 = err_kind.into();
                     let message = ptr::null_mut();
                     handle_outcome(
+                        server,
                         response.started,
                         response.duration,
-                        size,
-                        kind,
+                        err_kind,
+                        packet_size,
                         message,
-                        server,
                     );
                 }
             }
         }
+
         for server in servers {
             let server = Box::into_raw(Box::new(server)) as *mut CIpAddr;
-            handle_outcome(0, 0, 0, 0, ptr::null_mut(), server);
+            let started = 0;
+            let duration = 0;
+            let err_kind = 0;
+            let packet_size = 0;
+            let message = ptr::null_mut();
+            handle_outcome(server, started, duration, err_kind, packet_size, message);
         }
     })
     .is_ok() as u8
 }
 
+/// Traverse all cached requests.
+///
+/// # Arguments
+/// * `callback` - A callback to be called with an outcome for each server. It's arguments
+///   are:
+///   * `question` - A question with one or more cache records
+///   * `server` - A server with a cache record for this `question`
+///
+/// # Errors
+/// * If a zero value is returned this means that a panic was caught and the function returned
+///   abnormally.
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn netbase_cache_for_each_request(
     cache: *const CCache,
-    callback: extern "C" fn(*mut CIpAddr, *mut CQuestion) -> (),
+    callback: extern "C" fn(*mut CQuestion, *mut CIpAddr) -> (),
 ) -> u8 {
     panic::catch_unwind(|| {
         let cache = unsafe { &*(cache as *const Cache) };
         cache.for_each_request(|(question, server)| {
             let server = Box::into_raw(Box::new(server)) as *mut CIpAddr;
             let question = Box::into_raw(Box::new(question)) as *mut CQuestion;
-            callback(server, question);
+            callback(question, server);
         });
     })
     .is_ok() as u8

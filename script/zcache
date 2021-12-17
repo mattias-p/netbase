@@ -256,7 +256,7 @@ sub do_list {
 
     $cache->for_each_request(
         sub {
-            my ( $ns, $question ) = @_;
+            my ( $question, $ns ) = @_;
             print "$question \@$ns\n";
         }
     );
