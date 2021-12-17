@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
+use tokio::runtime::Handle;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Message;
@@ -33,16 +34,16 @@ use trust_dns_proto::xfer::DnsMultiplexerConnect;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum Protocol {
-    UDP,
-    TCP,
+    Udp,
+    Tcp,
 }
 
 impl TryFrom<u8> for Protocol {
     type Error = ();
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(Protocol::UDP),
-            2 => Ok(Protocol::TCP),
+            1 => Ok(Protocol::Udp),
+            2 => Ok(Protocol::Tcp),
             _ => Err(()),
         }
     }
@@ -51,8 +52,8 @@ impl TryFrom<u8> for Protocol {
 impl From<Protocol> for u8 {
     fn from(value: Protocol) -> u8 {
         match value {
-            Protocol::UDP => 1,
-            Protocol::TCP => 2,
+            Protocol::Udp => 1,
+            Protocol::Tcp => 2,
         }
     }
 }
@@ -166,7 +167,7 @@ impl fmt::Display for ErrorKind {
 }
 
 #[derive(Debug, Eq, PartialEq, Deserialize, Serialize)]
-struct Response {
+struct RetriedResponse {
     failures: Vec<Failure>,
     /// Millis since epoch
     started: u64,
@@ -175,9 +176,17 @@ struct Response {
     outcome: Result<MyMessage, ErrorKind>,
 }
 
+pub struct SingleResponse {
+    /// Millis since epoch
+    pub started: u64,
+    /// Millis
+    pub duration: u32,
+    pub outcome: Result<(Rc<Message>, u16), ErrorKind>,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 pub struct Cache {
-    cache: HashMap<Question, HashMap<IpAddr, Rc<Response>>>,
+    cache: HashMap<Question, HashMap<IpAddr, Rc<RetriedResponse>>>,
     #[serde(skip)]
     is_reading: Cell<bool>,
 }
@@ -195,16 +204,16 @@ impl Cache {
         net: Option<Rc<Net>>,
         question: Question,
         servers: &HashSet<IpAddr>,
-    ) -> HashMap<IpAddr, (u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
-        use futures_util::future::FutureExt;
+    ) -> HashMap<IpAddr, SingleResponse> {
         use futures::future;
+        use futures_util::future::FutureExt;
 
         let mut results = Vec::new();
         match net {
             None => results.extend(servers.iter().filter_map(|server| {
                 self.cache
                     .get(&question)
-                    .and_then(|inner| inner.get(&server))
+                    .and_then(|inner| inner.get(server))
                     .cloned()
                     .map(|response| (server, response))
             })),
@@ -217,12 +226,21 @@ impl Cache {
                 let mut queries = Vec::new();
                 for server in servers {
                     if self.is_reading.get() {
-                        return [(*server, (0, 0, Err(ErrorKind::Lock)))].into();
+                        results.push((
+                            server,
+                            Rc::new(RetriedResponse {
+                                started: 0,
+                                duration: 0,
+                                outcome: Err(ErrorKind::Lock),
+                                failures: Vec::new(),
+                            }),
+                        ));
+                        continue;
                     }
                     if let Some(response) = question_bucket.get(server) {
                         results.push((server, response.clone()));
                     } else {
-                        queries.push(net.lookup(&runtime, question.clone(), *server).map(
+                        queries.push(net.lookup(question.clone(), *server).map(
                             move |(failures, started, duration, bytes)| {
                                 let outcome = match bytes {
                                     Ok(bytes) => {
@@ -237,7 +255,7 @@ impl Cache {
                                         Err((&lookup_err).into())
                                     }
                                 };
-                                let response = Rc::new(Response {
+                                let response = Rc::new(RetriedResponse {
                                     failures,
                                     started,
                                     duration,
@@ -261,19 +279,19 @@ impl Cache {
             .map(|(server, response)| {
                 (
                     *server,
-                    (
-                        response.started,
-                        response.duration,
-                        match &response.outcome {
+                    SingleResponse {
+                        started: response.started,
+                        duration: response.duration,
+                        outcome: match &response.outcome {
                             Ok(mymessage) => match mymessage.decoded {
                                 Some(ref message) => {
                                     Ok((message.clone(), mymessage.encoded.len() as u16))
                                 }
                                 None => Err(ErrorKind::Protocol),
                             },
-                            Err(error_kind) => Err(error_kind.clone()),
+                            Err(error_kind) => Err(*error_kind),
                         },
-                    ),
+                    },
                 )
             })
             .collect()
@@ -346,7 +364,6 @@ pub struct Net {
 impl Net {
     pub async fn lookup(
         &self,
-        runtime: &Runtime,
         question: Question,
         server: IpAddr,
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
@@ -356,7 +373,7 @@ impl Net {
         let timeout = Duration::from_millis(self.timeout as u64);
         let retrans = Duration::from_millis(self.retrans as u64);
         let conn_start = Utc::now().timestamp_millis();
-        match Self::connect(&runtime, question.proto, address, timeout).await {
+        match Self::connect(question.proto, address, timeout).await {
             Ok(mut conn) => {
                 let (failures, outcome, query_start, query_duration) =
                     Self::query_retry(&mut conn, &question, self.retry, retrans).await;
@@ -421,31 +438,28 @@ impl Net {
     }
 
     async fn connect(
-        runtime: &Runtime,
         proto: Protocol,
         address: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
         match proto {
-            Protocol::UDP => Self::connect_udp(&runtime, address, timeout).await,
-            Protocol::TCP => Self::connect_tcp(&runtime, address, timeout).await,
+            Protocol::Udp => Self::connect_udp(address, timeout).await,
+            Protocol::Tcp => Self::connect_tcp(address, timeout).await,
         }
     }
 
     async fn connect_udp(
-        runtime: &Runtime,
         address: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
         let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
         AsyncClient::connect(stream).await.map(|(conn, bg)| {
-            runtime.spawn(bg);
+            Handle::current().spawn(bg);
             conn
         })
     }
 
     async fn connect_tcp(
-        runtime: &Runtime,
         address: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
@@ -454,7 +468,7 @@ impl Net {
         let stream: DnsMultiplexerConnect<_, _, Signer> =
             DnsMultiplexer::new(tcp_client_stream, handle, None);
         AsyncClient::connect(stream).await.map(|(conn, bg)| {
-            runtime.spawn(bg);
+            Handle::current().spawn(bg);
             conn
         })
     }
