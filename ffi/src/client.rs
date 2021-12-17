@@ -194,14 +194,14 @@ impl Cache {
         &mut self,
         net: Option<Rc<Net>>,
         question: Question,
-        servers: HashSet<IpAddr>,
+        servers: &HashSet<IpAddr>,
     ) -> HashMap<IpAddr, (u64, u32, Result<(Rc<Message>, u16), ErrorKind>)> {
         use futures_util::future::FutureExt;
         use futures::future;
 
         let mut results = Vec::new();
         match net {
-            None => results.extend(servers.into_iter().filter_map(|server| {
+            None => results.extend(servers.iter().filter_map(|server| {
                 self.cache
                     .get(&question)
                     .and_then(|inner| inner.get(&server))
@@ -217,12 +217,12 @@ impl Cache {
                 let mut queries = Vec::new();
                 for server in servers {
                     if self.is_reading.get() {
-                        return [(server, (0, 0, Err(ErrorKind::Lock)))].into();
+                        return [(*server, (0, 0, Err(ErrorKind::Lock)))].into();
                     }
-                    if let Some(response) = question_bucket.get(&server) {
+                    if let Some(response) = question_bucket.get(server) {
                         results.push((server, response.clone()));
                     } else {
-                        queries.push(net.lookup(&runtime, question.clone(), server).map(
+                        queries.push(net.lookup(&runtime, question.clone(), *server).map(
                             move |(failures, started, duration, bytes)| {
                                 let outcome = match bytes {
                                     Ok(bytes) => {
@@ -251,7 +251,7 @@ impl Cache {
                 let _guard = runtime.enter();
                 let responses = runtime.block_on(future::join_all(queries));
                 for (server, response) in responses {
-                    question_bucket.insert(server, response.clone());
+                    question_bucket.insert(*server, response.clone());
                     results.push((server, response));
                 }
             }
@@ -260,7 +260,7 @@ impl Cache {
             .into_iter()
             .map(|(server, response)| {
                 (
-                    server,
+                    *server,
                     (
                         response.started,
                         response.duration,
