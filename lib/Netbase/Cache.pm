@@ -34,11 +34,18 @@ use strict;
 use warnings;
 use utf8;
 
+use Carp qw( croak );
 use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
 use Netbase;
 use Netbase::Message;
 
 $Netbase::ffi->mangler( sub { "netbase_cache_" . shift } );
+
+=head1 ERRORS
+
+All these subroutines call foreign code to achieve their task.
+In case the foreign code panics (without terminating the process) the native
+subroutine reacts by calling C<croak>.
 
 =head1 CONSTRUCTORS
 
@@ -50,7 +57,15 @@ Construct a new empty cache.
 
 =cut
 
-$Netbase::ffi->attach( new => ['string'] => 'cache_t' );
+$Netbase::ffi->attach(
+    new => ['string'] => 'cache_t',
+    sub {
+        my ( $xsub, $class ) = @_;
+
+        return $xsub->( $class )    #
+          // croak "panic in foreign code\n";
+    }
+);
 
 =head2 from_bytes
 
@@ -60,7 +75,15 @@ Construct a new cache populated with the deserialized contents of a byte string.
 
 =cut
 
-$Netbase::ffi->attach( from_bytes => [ 'string', 'buffer' ] => 'cache_t' );
+$Netbase::ffi->attach(
+    from_bytes => [ 'string', 'buffer' ] => 'cache_t',
+    sub {
+        my ( $xsub, $class, $buffer ) = @_;
+
+        return $xsub->( $class, $buffer )    #
+          // croak "panic in foreign code\n";
+    },
+);
 
 =head1 METHODS
 
@@ -73,9 +96,10 @@ Serialize the contents into a byte string.
 =cut
 
 $Netbase::ffi->attach(
-    to_bytes => [ 'cache_t', '(usize)->opaque' ],
+    to_bytes => [ 'cache_t', '(usize)->opaque' ] => 'u8',
     sub {
         my ( $xsub, $cache ) = @_;
+
         my $buffer  = "";
         my $closure = $Netbase::ffi->closure(
             sub {
@@ -84,7 +108,10 @@ $Netbase::ffi->attach(
                 return scalar_to_pointer $buffer;
             }
         );
-        $xsub->( $cache, $closure );
+
+        $xsub->( $cache, $closure )
+          or croak "panic in foreign code\n";
+
         return $buffer;
     }
 );
@@ -101,9 +128,10 @@ Look up responses to a question from a set of server addresses.
 =cut
 
 $Netbase::ffi->attach(
-    lookup => [ 'cache_t', 'opaque', 'question_t', '(u64,u32,u16,u16,opaque,opaque)->void', 'opaque[]', 'usize' ],
+    lookup => [ 'cache_t', 'opaque', 'question_t', '(u64,u32,u16,u16,opaque,opaque)->void', 'opaque[]', 'usize' ] => 'u8',
     sub {
         my ( $xsub, $cache, $client, $question, @ips ) = @_;
+
         my %results;
         my $closure = $Netbase::ffi->closure(
             sub {
@@ -118,11 +146,15 @@ $Netbase::ffi->attach(
                 $results{$ip} = [ $start, $duration, $msg_size, $err_kind, $message ];
             }
         );
+
         if ( defined $client ) {
             $client = Netbase::net_to_opaque $client;
         }
+
         my @ip_ptrs = map { Netbase::ip_to_opaque $_ } @ips;
-        $xsub->( $cache, $client, $question, $closure, \@ip_ptrs, scalar @ips );
+
+        $xsub->( $cache, $client, $question, $closure, \@ip_ptrs, scalar @ips )
+          or croak "panic in foreign code\n";
 
         return \%results;
     }
@@ -141,9 +173,10 @@ Traverse all cached requests.
 =cut
 
 $Netbase::ffi->attach(
-    for_each_request => [ 'cache_t', '(opaque, opaque)->void' ],
+    for_each_request => [ 'cache_t', '(opaque, opaque)->void' ] => 'u8',
     sub {
         my ( $xsub, $cache, $callback ) = @_;
+
         my $closure = $Netbase::ffi->closure(
             sub {
                 my ( $ip, $question ) = @_;
@@ -152,7 +185,10 @@ $Netbase::ffi->attach(
                 $callback->( $ip, $question );
             }
         );
-        $xsub->( $cache, $closure );
+
+        $xsub->( $cache, $closure )
+          or croak "panic in foreign code\n";
+
         return;
     }
 );
@@ -172,9 +208,10 @@ Traverse all cached failed queries for a given request.
 =cut
 
 $Netbase::ffi->attach(
-    for_each_retry => [ 'cache_t', 'question_t', 'ip_t', '(u64, u32, u32)->void' ],
+    for_each_retry => [ 'cache_t', 'question_t', 'ip_t', '(u64, u32, u32)->void' ] => 'u8',
     sub {
         my ( $xsub, $cache, $question, $server, $callback ) = @_;
+
         my $closure = $Netbase::ffi->closure(
             sub {
                 my ( $start, $duration, $error ) = @_;
@@ -182,11 +219,21 @@ $Netbase::ffi->attach(
                 $callback->( $start, $duration, $error );
             }
         );
-        $xsub->( $cache, $question, $server, $closure );
+
+        $xsub->( $cache, $question, $server, $closure )
+          or croak "panic in foreign code\n";
+
         return;
     }
 );
 
-$Netbase::ffi->attach( DESTROY => ['cache_t'] );
+$Netbase::ffi->attach( DESTROY => ['cache_t'] => 'u8', sub {
+    my ( $xsub, $this ) = @_;
+
+    $xsub->( $this )
+      or croak "panic in foreign code\n";
+
+    return;
+});
 
 1;
