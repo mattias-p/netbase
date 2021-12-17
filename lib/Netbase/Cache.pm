@@ -58,11 +58,11 @@ Construct a new empty cache.
 =cut
 
 $Netbase::ffi->attach(
-    new => ['string'] => 'cache_t',
+    new => [] => 'cache_t',
     sub {
         my ( $xsub, $class ) = @_;
 
-        return $xsub->( $class )    #
+        return $xsub->()    #
           // croak "panic in foreign code\n";
     }
 );
@@ -76,12 +76,31 @@ Construct a new cache populated with the deserialized contents of a byte string.
 =cut
 
 $Netbase::ffi->attach(
-    from_bytes => [ 'string', 'buffer' ] => 'cache_t',
+    from_bytes => [ 'buffer', '(usize)->opaque' ] => 'cache_t',
     sub {
         my ( $xsub, $class, $buffer ) = @_;
 
-        return $xsub->( $class, $buffer )    #
-          // croak "panic in foreign code\n";
+        my $err_msg  = "";
+        my $closure = $Netbase::ffi->closure(
+            sub {
+                my ( $size ) = @_;
+                grow( $err_msg, $size );
+                return scalar_to_pointer $err_msg;
+            }
+        );
+
+        my $cache = $xsub->( $buffer, $closure );
+        if ( !defined $cache ) {
+            if ( $err_msg eq "" ) {
+                croak "panic in foreign code\n";
+            }
+            else {
+                $err_msg .= "\n";
+                croak $err_msg;
+            }
+        }
+
+        return $cache;
     },
 );
 

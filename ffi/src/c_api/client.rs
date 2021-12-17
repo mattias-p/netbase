@@ -13,8 +13,13 @@ use std::rc::Rc;
 
 pub type CCache = c_void;
 
+/// Constructs a new cache instance
+///
+/// # Errors
+/// * If a null pointer is returned this means that a panic was caught and the function returned
+///   abnormally.
 #[no_mangle]
-pub extern "C" fn netbase_cache_new(_class: *const i8) -> *mut CCache {
+pub extern "C" fn netbase_cache_new() -> *mut CCache {
     let result = panic::catch_unwind(|| Box::into_raw(Box::new(Cache::new())) as *mut CCache);
     match result {
         Ok(this) => this,
@@ -22,9 +27,20 @@ pub extern "C" fn netbase_cache_new(_class: *const i8) -> *mut CCache {
     }
 }
 
+/// Constructs a new cache instance
+///
+/// # Arguments
+/// * `bytes` - A pointer to the start of serialized data
+/// * `size` - Length of the serialized data
+/// * `get_buffer` - A callback for getting an error message buffer of required (non-zero) size.
+///
+/// # Errors
+/// * If the callback is called this means an error occurred and that details are found in the
+///   buffer.
+/// * If the callback is not called and the returned value is a null pointer, this means that a
+///   panic was caught and the function returned abnormally.
 #[no_mangle]
 pub extern "C" fn netbase_cache_from_bytes(
-    _class: *const i8,
     bytes: *const u8,
     size: usize,
     get_buffer: extern "C" fn(usize) -> *mut u8,
@@ -36,11 +52,11 @@ pub extern "C" fn netbase_cache_from_bytes(
             Ok(cache) => Box::into_raw(Box::new(cache)) as *mut CCache,
             Err(err) => {
                 let err = err.to_string();
-                let buffer = get_buffer(size);
-                let buffer = ptr::slice_from_raw_parts_mut(buffer, size);
+                let buffer = get_buffer(err.len());
+                let buffer = ptr::slice_from_raw_parts_mut(buffer, err.len());
                 let buffer = unsafe { &mut *buffer };
                 buffer.copy_from_slice(err.as_bytes());
-                std::ptr::null_mut()
+                ptr::null_mut()
             }
         }
     });
@@ -50,6 +66,15 @@ pub extern "C" fn netbase_cache_from_bytes(
     }
 }
 
+/// Serializes the cache into a byte string
+///
+/// # Arguments
+/// * `get_buffer` - A callback for getting a buffer of required size.
+///   Called exactly once.
+///
+/// # Errors
+/// * If a zero value is returned this means that a panic was caught and the function returned
+///   abnormally.
 #[no_mangle]
 pub extern "C" fn netbase_cache_to_bytes(
     cache: *const CCache,
@@ -113,7 +138,7 @@ pub extern "C" fn netbase_cache_lookup(
                 Err(kind) => {
                     let size = 0;
                     let kind: u16 = kind.into();
-                    let message = std::ptr::null_mut();
+                    let message = ptr::null_mut();
                     handle_outcome(
                         response.started,
                         response.duration,
