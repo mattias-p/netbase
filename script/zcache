@@ -350,7 +350,7 @@ sub show_all_attempts {
 
 sub show_outcome {
     my ( $question, $ns, $message, $err_kind, $start, $duration, $msg_size ) = @_;
-    print "; <<>> netbase <<>> $question \@$ns\n";
+    print "; <<>> zcache <<>> $question \@$ns\n";
 
     my $dt = DateTime->from_epoch( epoch => $start / 1_000.0 );
     if ( $message ) {
@@ -379,7 +379,7 @@ sub do_help {
     my ( $cmd_name ) = @_;
 
     if ( defined $cmd_name ) {
-        pod2usage( -verbose => 99, -sections => "SUBCOMMAND: netbase $cmd_name" );
+        pod2usage( -verbose => 99, -sections => "SUBCOMMAND: zcache $cmd_name" );
     }
     else {
         pod2usage( -verbose => 99, -sections => "NAME|SYNOPSIS|OPTIONS|SUBCOMMANDS|DESCRIPTION" );
@@ -392,10 +392,10 @@ sub usage_err {
     my ( $message, $cmd_name ) = @_;
 
     if ( defined $cmd_name ) {
-        pod2usage( -msg => "netbase: $message", -verbose => 99, -sections => "SUBCOMMAND: netbase $cmd_name/USAGE" );
+        pod2usage( -msg => "zcache: $message", -verbose => 99, -sections => "SUBCOMMAND: zcache $cmd_name/USAGE" );
     }
     else {
-        pod2usage( "netbase: $message" );
+        pod2usage( "zcache: $message" );
     }
 
     return;
@@ -407,17 +407,17 @@ if ( __PACKAGE__ eq 'main' ) {
 
 =head1 NAME
 
-netbase - DNS cache lookup utility
+zcache - DNS cache lookup utility
 
 =head1 SYNOPSIS
 
-netbase --help
+zcache --help
 
-netbase --help SUBCOMMAND
+zcache --help SUBCOMMAND
 
-netbase --man
+zcache --man
 
-netbase SUBCOMMAND [subcommand arguments and options]
+zcache SUBCOMMAND [subcommand arguments and options]
 
 =head1 OPTIONS
 
@@ -426,7 +426,7 @@ netbase SUBCOMMAND [subcommand arguments and options]
 =item B<--help>
 
 Print a brief help message and exit.
-If no subcommand is given the help message concerns B<netbase> itself.
+If no subcommand is given the help message concerns B<zcache> itself.
 If a subcommand is given the help message concerns that subcommand.
 
 =item B<--man>
@@ -453,13 +453,13 @@ Dump all requests in the cache, along with their outcomes.
 
 =back
 
-=head1 SUBCOMMAND: netbase query
+=head1 SUBCOMMAND: zcache query
 
 Perform a single lookup.
 
 =head2 USAGE
 
-netbase query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER... [query and config options]
+zcache query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER... [query and config options]
 
 =head2 MODE OPTIONS
 
@@ -595,13 +595,13 @@ Default is 1.
 
 =back
 
-=head1 SUBCOMMAND: netbase list
+=head1 SUBCOMMAND: zcache list
 
 List all requests in the cache.
 
 =head2 USAGE
 
-netbase list FILE
+zcache list FILE
 
 =head2 ARGUMENTS
 
@@ -613,13 +613,13 @@ Initialize the cache from the given FILE.
 
 =back
 
-=head1 SUBCOMMAND: netbase dump
+=head1 SUBCOMMAND: zcache dump
 
 Dump all requests in the cache, along with their outcomes.
 
 =head2 USAGE
 
-netbase dump FILE
+zcache dump FILE
 
 =head2 ARGUMENTS
 

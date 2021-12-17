@@ -1,6 +1,8 @@
 # Netbase
 
-A library and CLI tool to make cached DNS and ASN lookups.
+Netbase is a library to make cached DNS and ASN lookups.
+Accompanied with this library comes a CLI tool (zcache) for working with saved
+caches from the command line.
 
 N.B. ASN lookups aren't implemented yet.
 
@@ -11,6 +13,7 @@ fail or to block while it's making a network request to populate the cache entry
 before returning.
 
 Netbase is short for network database.
+Zcache is short for Zonemaster cache.
 
 ## Dependencies
 
@@ -35,9 +38,9 @@ sudo make install
 These are the major ways to access the documentation:
 
 ```sh
-netbase --help
-netbase --help query
-netbase --man
+zcache --help
+zcache --help query
+zcache --man
 ```
 
 ## Rationale
@@ -132,7 +135,7 @@ the cache before returning it.
 
 ## Architecture
 
-Netbase consists of two interfaces: a library and a CLI tool.
+Netbase consists of two interfaces: a library (Netbase) and a CLI tool (zcache).
 
 The CLI tool implements a few use cases that exercises all of the library API.
 
@@ -192,7 +195,7 @@ Replace the querying of normal requests to use trust_dns instead of ldns.
 I.e. non-AXFR requests.
 
 * Update Zonemaster::Engine::Nameserver::query to:
-  * Call Netbase::Net::query for the actual query and take care of the returned
+  * Call Netbase::Net::lookup for the actual query and take care of the returned
     wire formatted response.
   * Construct a Zonemaster::Engine::Packet using the response.
   * Implement the TC-flag fallback.
