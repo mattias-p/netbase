@@ -1,8 +1,7 @@
 # Netbase
 
 Netbase is a library to make cached DNS and ASN lookups.
-Accompanied with this library comes a CLI tool (zcache) for working with saved
-caches from the command line.
+It is accompanied by a CLI tool (zcache) for working with cache files.
 
 N.B. ASN lookups aren't implemented yet.
 
@@ -104,34 +103,6 @@ Using trust_dns was simply easier to get started with.
 Since we're starting out with trust_dns we should evaluate that first.
 If trust_dns doesn't measure up we still have the option to create Rust bindings
 for good old ldns.
-
-## Features
-
-### Cache
-
-The cache is basically a mapping from requests to responses.
-
-It contains a complete record of all requests that have been sent.
-Every request is marked with a time stamp and a duration representing the time
-(UTC) when the request was sent and the time taken before a response was
-received or an error occurred.
-When a request fails and is retried each attempt is recorded and time stamped.
-
-A request is represented by a normalized logical description from which an
-actual request can be generated.
-Two requests that differ only in what protocol they are sent over are given
-distinct representations.
-
-### Cache miss strategies
-
-When a request is made that has a cached response, that response is returned and
-no network request.
-
-When there is no cached response Netbase has two strategies for you to choose
-from.
-Either it gives an error response indicating that the request is not in the
-cache, or it transparently sends a network request and records the response in
-the cache before returning it.
 
 ## Architecture
 
