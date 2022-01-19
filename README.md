@@ -18,7 +18,7 @@ Zcache is short for Zonemaster cache.
 
 To build netbase you need these:
 * [FFI::Build::MM]
-* [FFI::Build::Lang::Rust]
+* [FFI::Build::File::Cargo]
 * [cargo/rustc] (rustc >= 1.56)
 
 In case you need to build FFI::Build::MM yourself you probably need these too:
@@ -286,4 +286,4 @@ Implement concurrent querying of multiple servers using the same question.
 
 [cargo/rustc]: https://rustup.rs/
 [FFI::Build::MM]: https://metacpan.org/pod/FFI::Build::MM
-[FFI::Build::Lang::Rust]: https://metacpan.org/pod/FFI::Platypus::Lang::Rust
+[FFI::Build::File::Cargo]: https://metacpan.org/pod/FFI::Build::File::Cargo
