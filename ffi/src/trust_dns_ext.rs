@@ -69,6 +69,7 @@ impl<'a> fmt::Display for DigMessage<'a> {
                         }
                         writeln!(f)?;
                     }
+                    data => writeln!(f, "{{unrecognized {:?}}}>", data)?,
                 }
             }
         }

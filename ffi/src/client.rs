@@ -1,5 +1,6 @@
 use crate::trust_dns_ext;
 use crate::trust_dns_ext::MyMessage;
+use futures_util::stream::StreamExt;
 use rmp_serde as rmps;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,7 +19,7 @@ use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
-use trust_dns_client::rr::dnssec::Signer;
+use trust_dns_client::rr::dnssec::SigSigner;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
 use trust_dns_client::tcp::TcpClientStream;
@@ -376,8 +377,7 @@ impl Net {
             Ok(mut conn) => {
                 let (failures, outcome, query_start, query_duration) =
                     Self::query_retry(&mut conn, &question, self.retry, retrans).await;
-                let bytes = outcome
-                    .map(|dns_response| dns_response.messages().next().unwrap().to_vec().unwrap());
+                let bytes = outcome.map(|dns_response| dns_response.to_vec().unwrap());
                 (failures, query_start, query_duration, bytes)
             }
             Err(err) => {
@@ -428,12 +428,16 @@ impl Net {
         use chrono::Utc;
         use trust_dns_proto::DnsHandle;
 
-        let query = client.send(question);
+        let mut query = client.send(question);
         let started = Utc::now().timestamp_millis();
-        let outcome = query.await;
+        let outcome = query.next().await;
         let finished = Utc::now().timestamp_millis();
         let duration = finished - started;
-        (outcome, started as u64, duration as u32)
+        (
+            outcome.unwrap_or(Err(ProtoErrorKind::Message("no response").into())),
+            started as u64,
+            duration as u32,
+        )
     }
 
     async fn connect(
@@ -464,7 +468,7 @@ impl Net {
     ) -> Result<AsyncClient, ProtoError> {
         let (tcp_client_stream, handle) =
             TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(address, timeout);
-        let stream: DnsMultiplexerConnect<_, _, Signer> =
+        let stream: DnsMultiplexerConnect<_, _, SigSigner> =
             DnsMultiplexer::new(tcp_client_stream, handle, None);
         AsyncClient::connect(stream).await.map(|(conn, bg)| {
             Handle::current().spawn(bg);
