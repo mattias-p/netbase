@@ -62,6 +62,7 @@ impl From<Protocol> for u8 {
 pub struct EdnsConfig {
     pub version: u8,
     pub dnssec_ok: bool,
+    pub max_payload: u16,
     pub option_code: u16,
     pub option_value: Vec<u8>,
     //pub set_z_flag: bool, TODO: implement this

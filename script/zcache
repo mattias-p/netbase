@@ -103,6 +103,7 @@ sub do_query {
     my $opt_proto   = $Netbase::PROTO_UDP;
     my $opt_recurse = 0;
     my $opt_dnssec;
+    my $opt_bufsize = 512;
     my $opt_edns_version;
     my $opt_edns_opt;
     Getopt::Long::Configure qw(
@@ -119,6 +120,12 @@ sub do_query {
         'ednsopt=s'  => \$opt_edns_opt,
         'noednsopt+' => sub { $opt_edns_opt = undef },
         'dnssec!'    => \$opt_dnssec,
+        'bufsize=i'  => sub {
+            $opt_bufsize = shift;
+            if ( $opt_bufsize == 0 ) {
+                $opt_edns_version = undef;
+            }
+        },
     ) or usage_err( "Error in subcommand line arguments", "query" );
 
     my $edns_opt_code;
@@ -197,7 +204,7 @@ sub do_query {
         }
     );
     if ( defined $opt_edns_version ) {
-        $question->set_edns( $opt_edns_version, $opt_dnssec, $edns_opt_code, $edns_opt_value );
+        $question->set_edns( $opt_edns_version, $opt_dnssec, $opt_bufsize, $edns_opt_code, $edns_opt_value );
     }
 
     # Check clobber

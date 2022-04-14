@@ -41,6 +41,7 @@ pub extern "C" fn netbase_question_set_edns(
     this: *mut CQuestion,
     version: u8,
     dnssec_ok: u8,
+    max_payload: u16,
     option_code: u16,
     option_value: *const u8,
     option_value_len: usize,
@@ -59,6 +60,7 @@ pub extern "C" fn netbase_question_set_edns(
     this.edns_config = Some(EdnsConfig {
         version,
         dnssec_ok,
+        max_payload,
         option_code,
         option_value,
     });
