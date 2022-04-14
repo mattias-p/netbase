@@ -5,6 +5,7 @@ use crate::client::Net;
 use crate::client::Question;
 use std::ffi::c_void;
 use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::ptr;
 use std::rc::Rc;
 
@@ -13,11 +14,15 @@ pub type CNet = c_void;
 #[no_mangle]
 pub extern "C" fn netbase_net_new(
     _class: *const i8,
+    bind_addr: *const CIpAddr,
     timeout: u32,
     retry: u16,
     retrans: u32,
 ) -> *mut CNet {
+    let bind_addr = unsafe { *(bind_addr as *const IpAddr) };
+    let bind_addr = SocketAddr::new(bind_addr, 0);
     let net = Rc::new(Net {
+        bind_addr,
         timeout,
         retry,
         retrans,

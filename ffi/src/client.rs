@@ -357,6 +357,7 @@ pub struct Failure {
 
 #[derive(Debug)]
 pub struct Net {
+    pub bind_addr: SocketAddr,
     pub timeout: u32,
     pub retry: u16,
     pub retrans: u32,
@@ -370,11 +371,11 @@ impl Net {
     ) -> (Vec<Failure>, u64, u32, Result<Vec<u8>, ProtoError>) {
         use chrono::Utc;
 
-        let address = SocketAddr::new(server, 53);
+        let server_addr = SocketAddr::new(server, 53);
         let timeout = Duration::from_millis(self.timeout as u64);
         let retrans = Duration::from_millis(self.retrans as u64);
         let conn_start = Utc::now().timestamp_millis();
-        match Self::connect(question.proto, address, timeout).await {
+        match Self::connect(question.proto, server_addr, self.bind_addr, timeout).await {
             Ok(mut conn) => {
                 let (failures, outcome, query_start, query_duration) =
                     Self::query_retry(&mut conn, &question, self.retry, retrans).await;
@@ -443,20 +444,26 @@ impl Net {
 
     async fn connect(
         proto: Protocol,
-        address: SocketAddr,
+        server_addr: SocketAddr,
+        bind_addr: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
         match proto {
-            Protocol::Udp => Self::connect_udp(address, timeout).await,
-            Protocol::Tcp => Self::connect_tcp(address, timeout).await,
+            Protocol::Udp => Self::connect_udp(server_addr, bind_addr, timeout).await,
+            Protocol::Tcp => Self::connect_tcp(server_addr, bind_addr, timeout).await,
         }
     }
 
     async fn connect_udp(
-        address: SocketAddr,
+        server_addr: SocketAddr,
+        bind_addr: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
-        let stream = UdpClientStream::<UdpSocket>::with_timeout(address, timeout);
+        let stream = UdpClientStream::<UdpSocket>::with_bind_addr_and_timeout(
+            server_addr,
+            Some(bind_addr),
+            timeout,
+        );
         AsyncClient::connect(stream).await.map(|(conn, bg)| {
             Handle::current().spawn(bg);
             conn
@@ -464,11 +471,16 @@ impl Net {
     }
 
     async fn connect_tcp(
-        address: SocketAddr,
+        server_addr: SocketAddr,
+        bind_addr: SocketAddr,
         timeout: Duration,
     ) -> Result<AsyncClient, ProtoError> {
         let (tcp_client_stream, handle) =
-            TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_timeout(address, timeout);
+            TcpClientStream::<AsyncIoTokioAsStd<TcpStream>>::with_bind_addr_and_timeout(
+                server_addr,
+                Some(bind_addr),
+                timeout,
+            );
         let stream: DnsMultiplexerConnect<_, _, SigSigner> =
             DnsMultiplexer::new(tcp_client_stream, handle, None);
         AsyncClient::connect(stream).await.map(|(conn, bg)| {

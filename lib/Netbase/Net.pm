@@ -6,22 +6,24 @@ use utf8;
 use Carp qw( croak );
 use FFI::Platypus::Buffer qw( grow scalar_to_pointer );
 use Netbase;
+use Netbase::IP qw( ip );
 
 $Netbase::ffi->mangler( sub { "netbase_net_" . shift } );
 
 $Netbase::ffi->attach(
-    new => [ 'string', 'u32', 'u16', 'u32' ] => 'net_t',
+    new => [ 'string', 'ip_t', 'u32', 'u16', 'u32' ] => 'net_t',
     sub {
         my ( $xsub, $class, %args ) = @_;
-        my $timeout = delete $args{timeout} // 30;
-        my $retry   = delete $args{retry}   // 3;
-        my $retrans = delete $args{retrans} // 1;
+        my $bind_addr = delete $args{bind_addr} // '0.0.0.0';
+        my $timeout   = delete $args{timeout}   // 30;
+        my $retry     = delete $args{retry}     // 3;
+        my $retrans   = delete $args{retrans}   // 1;
         if ( %args ) {
             croak "unrecognized arguments: " . join( ' ', sort keys %args );
         }
         $timeout = int( $timeout * 1000 );
         $retrans = int( $retrans * 1000 );
-        return $xsub->( $class, $timeout, $retry, $retrans );
+        return $xsub->( $class, ip( $bind_addr ), $timeout, $retry, $retrans );
     }
 );
 
