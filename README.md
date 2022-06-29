@@ -248,12 +248,11 @@ Implement concurrent querying of multiple servers using the same question.
 * Dig-like output from CLI tool. (Incl. all record types and OPT pseudo section.)
 * Lookups to multiple servers with identical requests can be made in a single
   call. (We could rip it out to make fairer benchmarks.)
+* Support setting the source address in requests.
 
 ### ToDo
 
 #### Feature parity
-* Support setting the source address in requests.
-  (https://github.com/bluejekyll/trust-dns/pull/1586)
 * Support setting EDNS Z flags in requests.
   (https://docs.rs/trust-dns-client/latest/trust_dns_client/op/struct.Edns.html)
 * Review the implemented feature set.
