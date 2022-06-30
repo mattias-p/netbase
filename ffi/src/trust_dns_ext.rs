@@ -191,7 +191,9 @@ pub mod custom_serde {
             where
                 S: Serializer,
             {
-                let s = value.to_bytes().unwrap();
+                let s = value
+                    .to_bytes()
+                    .expect("could not serialize record type value to bytes");
                 let value = u16::from_be_bytes([s[0], s[1]]);
                 serializer.serialize_u16(value)
             }
