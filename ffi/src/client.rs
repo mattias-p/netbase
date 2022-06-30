@@ -297,14 +297,13 @@ impl Cache {
             .collect()
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, rmps::encode::Error> {
         let mut buf = Vec::new();
-        self.serialize(&mut rmps::Serializer::new(&mut buf))
-            .unwrap();
-        buf
+        self.serialize(&mut rmps::Serializer::new(&mut buf))?;
+        Ok(buf)
     }
 
-    pub fn from_vec(buf: Vec<u8>) -> Result<Cache, rmps::decode::Error> {
+    pub fn from_bytes(buf: Vec<u8>) -> Result<Cache, rmps::decode::Error> {
         Cache::deserialize(&mut rmps::Deserializer::new(&buf[..]))
     }
 
