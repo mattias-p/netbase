@@ -303,8 +303,8 @@ impl Cache {
         Ok(buf)
     }
 
-    pub fn from_bytes(buf: Vec<u8>) -> Result<Cache, rmps::decode::Error> {
-        Cache::deserialize(&mut rmps::Deserializer::new(&buf[..]))
+    pub fn from_bytes(buf: &[u8]) -> Result<Cache, rmps::decode::Error> {
+        Cache::deserialize(&mut rmps::Deserializer::new(buf))
     }
 
     pub fn for_each_request(&self, callback: impl FnMut((Question, IpAddr))) {

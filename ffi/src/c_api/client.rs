@@ -48,7 +48,7 @@ pub extern "C" fn netbase_cache_from_bytes(
     let result = panic::catch_unwind(|| {
         let bytes = ptr::slice_from_raw_parts(bytes, size);
         let bytes = unsafe { &*bytes };
-        match Cache::from_bytes(bytes.to_vec()) {
+        match Cache::from_bytes(bytes) {
             Ok(cache) => Box::into_raw(Box::new(cache)) as *mut CCache,
             Err(err) => {
                 let err = err.to_string();
