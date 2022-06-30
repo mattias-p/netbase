@@ -223,7 +223,6 @@ impl Cache {
                     .cache
                     .entry(question.clone())
                     .or_insert_with(HashMap::new);
-                let runtime = Runtime::new().unwrap();
                 let mut queries = Vec::new();
                 for server in servers {
                     if self.is_reading.get() {
@@ -267,8 +266,8 @@ impl Cache {
                         ));
                     }
                 }
-                let _guard = runtime.enter();
-                let responses = runtime.block_on(future::join_all(queries));
+                let _guard = net.runtime.enter();
+                let responses = net.runtime.block_on(future::join_all(queries));
                 for (server, response) in responses {
                     question_bucket.insert(*server, response.clone());
                     results.push((server, response));
@@ -361,6 +360,7 @@ pub struct Net {
     pub timeout: u32,
     pub retry: u16,
     pub retrans: u32,
+    pub runtime: Runtime,
 }
 
 impl Net {

@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ptr;
 use std::rc::Rc;
+use tokio::runtime::Runtime;
 
 pub type CNet = c_void;
 
@@ -21,11 +22,13 @@ pub extern "C" fn netbase_net_new(
 ) -> *mut CNet {
     let bind_addr = unsafe { *(bind_addr as *const IpAddr) };
     let bind_addr = SocketAddr::new(bind_addr, 0);
+    let runtime = Runtime::new().unwrap();
     let net = Rc::new(Net {
         bind_addr,
         timeout,
         retry,
         retrans,
+        runtime,
     });
     Rc::into_raw(net) as *mut CNet
 }
@@ -39,8 +42,6 @@ pub extern "C" fn netbase_net_lookup(
     query_duration: *mut u32,
     get_buffer: extern "C" fn(usize) -> *mut u8,
 ) -> u16 {
-    use tokio::runtime::Runtime;
-
     let net = unsafe { &mut *(net as *mut Net) };
     let server = unsafe { *(server as *const IpAddr) };
     let question = unsafe { &*(question as *const Question) };
