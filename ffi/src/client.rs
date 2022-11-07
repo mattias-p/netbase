@@ -17,6 +17,7 @@ use tokio::net::UdpSocket;
 use tokio::runtime::Handle;
 use tokio::runtime::Runtime;
 use trust_dns_client::client::AsyncClient;
+use trust_dns_client::op::Edns;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
 use trust_dns_client::rr::dnssec::SigSigner;
@@ -106,7 +107,7 @@ impl From<Question> for DnsRequest {
         // Extended dns
         if let Some(edns_config) = question.edns_config {
             request_options.use_edns = true;
-            let edns = message.edns_mut();
+            let edns = message.extensions_mut().get_or_insert_with(Edns::new);
             edns.set_max_payload(512);
             edns.set_version(edns_config.version);
             edns.set_dnssec_ok(edns_config.dnssec_ok);

@@ -49,7 +49,7 @@ impl<'a> fmt::Display for DigMessage<'a> {
             header.additional_count()
         )?;
 
-        if let Some(edns) = self.0.edns() {
+        if let Some(edns) = self.0.extensions() {
             writeln!(f)?;
             writeln!(f, ";; OPT PSEUDOSECTION:")?;
             write!(f, "; EDNS: version: {}, flags:", edns.version())?;
@@ -75,7 +75,7 @@ impl<'a> fmt::Display for DigMessage<'a> {
         }
 
         if header.query_count() > 0 {
-            if self.0.edns().is_none() {
+            if self.0.extensions().is_none() {
                 writeln!(f)?;
             }
             writeln!(f, ";; QUESTION SECTION:")?;
