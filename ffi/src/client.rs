@@ -379,7 +379,7 @@ impl Net {
             Ok(mut conn) => {
                 let (failures, outcome, query_start, query_duration) =
                     Self::query_retry(&mut conn, &question, self.retry, retrans).await;
-                let bytes = outcome.map(|dns_response| dns_response.to_vec().unwrap());
+                let bytes = outcome.map(|dns_response| dns_response.into_buffer());
                 (failures, query_start, query_duration, bytes)
             }
             Err(err) => {
