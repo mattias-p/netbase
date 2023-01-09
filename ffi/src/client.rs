@@ -419,7 +419,8 @@ impl Net {
             }
         }
 
-        let (outcome, query_start, query_duration) = final_outcome.unwrap();
+        let (outcome, query_start, query_duration) =
+            final_outcome.expect("at this point final_outcome is always Some");
         (failures, outcome, query_start, query_duration)
     }
 
