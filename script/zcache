@@ -224,7 +224,7 @@ sub do_query {
     my $net;
     if ( !defined $opt_read || $opt_force ) {
         $net = Netbase::Net->new(
-            base_addr => ip( $opt_bind_addr ),
+            bind_addr => ip( $opt_bind_addr ),
             timeout   => $opt_timeout,
             retry     => $opt_retry,
             retrans   => $opt_retrans,
@@ -297,7 +297,7 @@ sub do_dump {
     my @queries;
     $cache->for_each_request(
         sub {
-            my ( $ns, $question ) = @_;
+            my ( $question, $ns ) = @_;
             my $outcomes = $cache->lookup( undef, $question, $ns );
             for my $outcome_ns ( keys %{ $outcomes } ) {
                 my ( $start, $duration, $msg_size, $err_kind, $message ) = @{ $outcomes->{$outcome_ns} };
