@@ -1,5 +1,6 @@
 use ExtUtils::MakeMaker;
 use FFI::Build::MM;
+use FFI::Platypus::Lang::Rust;
 
 my $fbmm = FFI::Build::MM->new;
 
