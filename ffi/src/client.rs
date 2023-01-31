@@ -341,7 +341,7 @@ impl Cache {
         eprintln!(
             "{} netbase: {:?}",
             Utc.timestamp_millis_opt(started as i64)
-                .expect("timestamp more than 262000 years away from current era")
+                .unwrap()
                 .format("%F %H:%M:%S%.3f"),
             error
         );
