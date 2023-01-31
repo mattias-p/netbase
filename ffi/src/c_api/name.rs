@@ -59,7 +59,7 @@ mod tests {
         let name_class = CString::new("Netbase::Name").unwrap();
         let qname = CString::new("example.com").unwrap();
         let name = netbase_name_from_ascii(name_class.as_ptr(), qname.as_ptr() as *mut i8);
-        assert!(name != ptr::null_mut());
+        assert!(!name.is_null());
         let strp = netbase_name_to_string(name);
         assert_eq!(
             unsafe { CStr::from_ptr(strp).to_string_lossy().into_owned() },

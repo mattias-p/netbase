@@ -438,7 +438,7 @@ impl Net {
         let finished = Utc::now().timestamp_millis();
         let duration = finished - started;
         (
-            outcome.unwrap_or(Err(ProtoErrorKind::Message("no response").into())),
+            outcome.unwrap_or_else(|| Err(ProtoErrorKind::Message("no response").into())),
             started as u64,
             duration as u32,
         )

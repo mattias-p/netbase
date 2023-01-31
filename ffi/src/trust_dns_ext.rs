@@ -310,7 +310,7 @@ mod tests {
         {
             let input = Question {
                 qname: "example.com".parse().unwrap(),
-                qtype: RecordType::SOA.into(),
+                qtype: RecordType::SOA,
             };
             assert_eq!(&input, &round_trip(&input));
         }
@@ -318,7 +318,7 @@ mod tests {
         {
             let input = Question {
                 qname: "example.com.".parse().unwrap(),
-                qtype: RecordType::NS.into(),
+                qtype: RecordType::NS,
             };
             assert_eq!(&input, &round_trip(&input));
         }
