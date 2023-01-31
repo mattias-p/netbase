@@ -479,7 +479,7 @@ Perform a single lookup.
 
 =head2 USAGE
 
-zcache query [-f] [-r FILE|-u FILE|-w FILE] [-q] NAME [-t] TYPE SERVER... [query and config options]
+zcache query [-f] [-r FILE|-u FILE|-c FILE] [-q] NAME [-t] TYPE SERVER... [query and config options]
 
 =head2 MODE OPTIONS
 
