@@ -340,7 +340,8 @@ impl Cache {
         use chrono::Utc;
         eprintln!(
             "{} netbase: {:?}",
-            Utc.timestamp_millis(started as i64)
+            Utc.timestamp_millis_opt(started as i64)
+                .expect("timestamp more than 262000 years away from current era")
                 .format("%F %H:%M:%S%.3f"),
             error
         );
