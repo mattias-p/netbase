@@ -20,7 +20,7 @@ use trust_dns_client::client::AsyncClient;
 use trust_dns_client::op::Edns;
 use trust_dns_client::op::Message;
 use trust_dns_client::op::Query;
-use trust_dns_client::rr::dnssec::SigSigner;
+use trust_dns_client::proto::rr::dnssec::SigSigner;
 use trust_dns_client::rr::Name;
 use trust_dns_client::rr::RecordType;
 use trust_dns_client::tcp::TcpClientStream;

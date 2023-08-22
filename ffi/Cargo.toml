@@ -16,5 +16,5 @@ serde = { version = "1.0", features = ["rc"] }
 serde_bytes = "0.11.5"
 serde_derive = "1.0"
 tokio = { version = "1.14.0", features = ["full"] }
-trust-dns-client = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "0b6fefea3fefe1086fed4df6781550462de51553", features = ["dnssec-openssl"] }
-trust-dns-proto = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "0b6fefea3fefe1086fed4df6781550462de51553" }
+trust-dns-client = { version = "0.23", features = ["dnssec-openssl"] }
+trust-dns-proto = "0.23"
