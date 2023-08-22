@@ -267,13 +267,13 @@ Implement concurrent querying of multiple servers using the same question.
   (https://rust-unofficial.github.io/patterns/patterns/ffi/export.html)
 * What happens if we `die` in Perl callbacks called from Rust?
   Could it be undefined behavior?
-* Add tooling for finding memory errors. (Use https://valgrind.org/ or
-  something.)
+* Mitigate the risk for memory errors. (Using [Valgrind] or [UniFFI] or
+  something).
 
 #### Maintainability
-* Revisit the naming of things to make it more consistent. Today there are little
-  messes around at least lookups/queries/questions/requests, server/ns/ip and
-  outcomes/responses/results.
+* Revisit the naming of things to make it more consistent. Today there are
+  little messes around at least lookups/queries/questions/requests, server/ns/ip
+  and outcomes/responses/results.
 * Revisit all parts of the Rust code and add unit tests for everything.
 
 #### Future work
@@ -284,5 +284,7 @@ Implement concurrent querying of multiple servers using the same question.
   Both the Cymru and Ripe protocols.
 
 [cargo/rustc]: https://rustup.rs/
-[FFI::Build::MM]: https://metacpan.org/pod/FFI::Build::MM
 [FFI::Build::File::Cargo]: https://metacpan.org/pod/FFI::Build::File::Cargo
+[FFI::Build::MM]: https://metacpan.org/pod/FFI::Build::MM
+[UniFFI]: https://github.com/mozilla/uniffi-rs
+[Valgrind]: https://valgrind.org/
