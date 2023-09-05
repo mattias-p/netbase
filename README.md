@@ -54,14 +54,14 @@ I'm believer in the Unix philosophy to do one thing and do it well.
 I'm also a believer in small steps.
 So the scope of Netbase does not stretch above caching.
 
-While already at the time of writing the general design of the caching
-implementation is very good there are a few wrinkles.
+At the time of writing (in 2022) the general design of the current Zonemaster
+caching implementation is already quite good. But there are a few wrinkles:
 
 * Neither AXFR requests nor ASN lookups are included in the cache.
   This is problematic for the unit tests as well as when you want to save a
   recorded cache for later analysis.
 
-* Timed out or otherwise failed request that result in retries are not include
+* Timed out or otherwise failed request that result in retries are not included
   in the cache.
   Having this information in plain sight would be helpful when investigating
   behaviors of both the network and of Zonemaster Engine itself.
@@ -77,22 +77,22 @@ implementation is very good there are a few wrinkles.
 Solving the first two wrinkles is easy if we're reimplementing these parts of
 the code anyway.
 
-Solving the last two wrinkles at this point is arguably easier than not solving
-them.
-Having those lets us try out the API with simple requests while it's being
-developed.
+Given that we're reimplementing these parts, solving the last two wrinkles is
+arguably easier than not solving them.
+Having those features lets us try out the API with simple requests while it's
+being developed.
 
 ### Technology choices
 
 When it came to the choice of language I simply settled on Rust.
-It's very performant, very reliable and if you ask me it's generally nice to be
-around.
+It's very performant, very reliable and if you ask me it's a language that's
+generally nice to be around.
 
 Once the C API is well defined and stable we should stop and think about whether
 Rust is the compiled language we want to use.
-If we decide it is then good.
+If we decide it is, then good.
 In case we aren't sure we can just reimplement the C API using a different
-language.
+language for comparison.
 This should be considerably easier than remaking this entire proof-of-concept
 from scratch.
 
@@ -147,12 +147,17 @@ This migration plan makes a point of benchmarking so we can see what we won.
 Netbase reimplements a small part of Zonemaster Engine and replaces most but not
 all of Zonemaster LDNS.
 
-The part of LDNS that is left out from Netbase is the fallback mechanism for
+One part of LDNS that is left out from Netbase is the fallback mechanism for
 switching protocols when a truncated response is received.
 It's helpful to have a record of the truncated response when debugging, so this
 mechanism is best implemented above the caching layer.
 Since Netbase is all about the caching it seems like a bad idea to add features
 below the Netbase interface but above the cache layer.
+
+Another part of LDNS that is left out from Netbase is the libidn bindings.
+We should look into other ways to provide these bindings.
+E.g. these bindings could be moved to Engine, or maybe there is a third party
+library we could depend on.
 
 #### Stage 0: Reference benchmark
 
@@ -266,7 +271,7 @@ Implement concurrent querying of multiple servers using the same question.
 * Review FFI with regard to advice on object-based APIs.
   (https://rust-unofficial.github.io/patterns/patterns/ffi/export.html)
 * What happens if we `die` in Perl callbacks called from Rust?
-  Could it be undefined behavior?
+  Could this be undefined behavior?
 * Mitigate the risk for memory errors. (Using [Valgrind] or [UniFFI] or
   something).
 
